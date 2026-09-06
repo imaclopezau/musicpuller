@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+env/
+venv/
+.venv/
+.env
+static/music/*.mp3
+static/music/*.wav
+static/music/*.json
+static/music/*.log
+static/music/*.flag
+node_modules/
+.DS_Store

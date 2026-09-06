@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Suno Auto-Recorder</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background-color: #1e1e1e;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+            width: 100%;
+            max-width: 500px;
+            text-align: center;
+        }
+        h1 {
+            margin-top: 0;
+            color: #ff5e00;
+        }
+        p {
+            color: #aaaaaa;
+            margin-bottom: 24px;
+        }
+        button {
+            background-color: #ff5e00;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            width: 100%;
+            font-weight: bold;
+            transition: background-color 0.2s;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #e05300;
+        }
+        #stop-btn {
+            background-color: #ff4444;
+            display: none;
+        }
+        #stop-btn:hover {
+            background-color: #cc0000;
+        }
+        .alert {
+            padding: 12px;
+            background-color: #ff4444;
+            color: white;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            text-align: left;
+        }
+        #status-container {
+            background-color: #333;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 20px;
+            text-align: center;
+        }
+        #status-text {
+            color: #fff;
+            font-size: 18px;
+            font-weight: bold;
+            margin: 0 0 5px 0;
+        }
+        #status-details {
+            color: #ccc;
+            margin: 0;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Suno Auto-Recorder</h1>
+    <p>Select your audio device and click Start. Whenever a song plays, it will be automatically recorded and saved.</p>
+    
+    <div style="margin-bottom: 20px; text-align: left;">
+        <label for="device_name" style="color: #ccc; font-size: 14px; display: block; margin-bottom: 8px;">Audio Device:</label>
+        <select name="device_name" id="device_name" style="width: 100%; padding: 12px; border: 1px solid #333; background-color: #2a2a2a; color: #fff; border-radius: 6px;">
+            <option value="">Loading devices...</option>
+        </select>
+        <small style="color: #888; display: block; margin-top: 5px;">Select the device where you hear the music.</small>
+    </div>
+
+    <button type="button" id="start-btn">Start Auto-Recorder</button>
+    <button type="button" id="stop-btn">Stop Auto-Recorder</button>
+    
+    <div style="margin-top: 15px;">
+        <a href="/player" style="color: #ff5e00; text-decoration: none;">View Player Library</a>
+    </div>
+
+    <div id="status-container">
+        <p id="status-text">Status: Stopped</p>
+        <p id="status-details">Not listening.</p>
+    </div>
+</div>
+
+<script>
+    let pollInterval = null;
+
+    // Fetch devices on load
+    async function loadDevices() {
+        try {
+            const res = await fetch('/devices');
+            const data = await res.json();
+            const select = document.getElementById('device_name');
+            select.innerHTML = '';
+            data.devices.forEach(d => {
+                const opt = document.createElement('option');
+                opt.value = d;
+                opt.textContent = d;
+                if(d === data.default) opt.selected = true;
+                select.appendChild(opt);
+            });
+        } catch(e) {
+            console.error("Failed to load devices", e);
+        }
+    }
+    loadDevices();
+    
+    async function pollStatus() {
+        try {
+            const res = await fetch('/auto_status');
+            const data = await res.json();
+            
+            const stText = document.getElementById('status-text');
+            const stDetails = document.getElementById('status-details');
+            
+            if (data.state === 'stopped' || data.state === 'error') {
+                document.getElementById('start-btn').style.display = 'block';
+                document.getElementById('stop-btn').style.display = 'none';
+                clearInterval(pollInterval);
+                pollInterval = null;
+            } else {
+                document.getElementById('start-btn').style.display = 'none';
+                document.getElementById('stop-btn').style.display = 'block';
+            }
+            
+            stText.textContent = `Status: ${data.state.charAt(0).toUpperCase() + data.state.slice(1)}`;
+            stDetails.textContent = data.details || "";
+            
+            if (data.state === 'error') {
+                stText.style.color = '#ff4444';
+            } else if (data.state === 'recording') {
+                stText.style.color = '#ff5e00';
+            } else if (data.state === 'saving') {
+                stText.style.color = '#ffff00';
+            } else {
+                stText.style.color = '#ffffff';
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    document.getElementById('start-btn').addEventListener('click', async () => {
+        const device = document.getElementById('device_name').value;
+        const formData = new FormData();
+        formData.append('device_name', device);
+        
+        try {
+            await fetch('/start_auto', { method: 'POST', body: formData });
+            document.getElementById('start-btn').style.display = 'none';
+            document.getElementById('stop-btn').style.display = 'block';
+            
+            document.getElementById('status-text').textContent = "Status: Starting...";
+            document.getElementById('status-details').textContent = "Connecting to device...";
+            
+            if (!pollInterval) {
+                pollInterval = setInterval(pollStatus, 1000);
+            }
+        } catch (e) {
+            alert("Error starting recorder: " + e.message);
+        }
+    });
+
+    document.getElementById('stop-btn').addEventListener('click', async () => {
+        try {
+            await fetch('/stop_auto', { method: 'POST' });
+            document.getElementById('status-text').textContent = "Status: Stopping...";
+            document.getElementById('status-details').textContent = "Waiting for backend to halt...";
+        } catch (e) {
+            alert("Error stopping recorder: " + e.message);
+        }
+    });
+    
+    // Check if it's already running on page load
+    pollStatus();
+    pollInterval = setInterval(pollStatus, 1000);
+</script>
+</body>
+</html>
