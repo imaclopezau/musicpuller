@@ -1,0 +1,88 @@
+// MusicPuller Content Script for Suno.com
+// Injects a lossless "⬇ Lossless" button directly into Suno's active player & track items
+
+console.log("[MusicPuller] Suno Companion loaded.");
+
+let currentPlayingTitle = "";
+
+// Helper to get currently playing song title from Suno DOM
+function getCurrentPlayingTitle() {
+  // Method 1: Bottom player bar title
+  const bottomPlayerTitle = document.querySelector('[data-testid="player-title"], [class*="PlayerTitle"], [class*="track-title"]');
+  if (bottomPlayerTitle && bottomPlayerTitle.textContent.trim()) {
+    return bottomPlayerTitle.textContent.trim();
+  }
+
+  // Method 2: Active or highlighted track in library/playlist
+  const playingItem = document.querySelector('[aria-label="Pause"], [data-playing="true"]');
+  if (playingItem) {
+    const parentRow = playingItem.closest('[class*="row"], [class*="track"], [class*="card"], li');
+    if (parentRow) {
+      const heading = parentRow.querySelector('h3, h4, a[href*="/song/"], [class*="title"]');
+      if (heading && heading.textContent.trim()) {
+        return heading.textContent.trim();
+      }
+    }
+  }
+
+  // Method 3: Page title fallback
+  const docTitle = document.title.replace(/\s*\|\s*Suno.*$/, "").trim();
+  return docTitle || "Suno Track";
+}
+
+// Receive stream captured by background service worker
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === "STREAM_DETECTED") {
+    currentPlayingTitle = getCurrentPlayingTitle();
+    console.log(`[MusicPuller] Stream captured for: "${currentPlayingTitle}" -> ${msg.url}`);
+    
+    // Automatically notify background to save to MusicPuller folder
+    chrome.runtime.sendMessage({
+      type: "SAVE_TRACK_TO_SERVER",
+      streamUrl: msg.url,
+      title: currentPlayingTitle
+    }, (res) => {
+      showToastNotification(`✓ Grabbed: ${currentPlayingTitle}`);
+    });
+  }
+});
+
+// Toast notification UI injected on suno.com
+function showToastNotification(text) {
+  let toast = document.getElementById("musicpuller-toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "musicpuller-toast";
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 80px;
+      right: 25px;
+      background: linear-gradient(135deg, #111, #1e1e1e);
+      color: #00ff88;
+      border: 1px solid #00ff88;
+      box-shadow: 0 4px 18px rgba(0, 255, 136, 0.35);
+      border-radius: 8px;
+      padding: 12px 18px;
+      font-size: 13px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-weight: 600;
+      z-index: 999999;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.3s ease;
+      opacity: 0;
+      transform: translateY(10px);
+    `;
+    document.body.appendChild(toast);
+  }
+
+  toast.innerHTML = `🎵 <span>${text}</span>`;
+  toast.style.opacity = "1";
+  toast.style.transform = "translateY(0)";
+
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateY(10px)";
+  }, 4000);
+}
