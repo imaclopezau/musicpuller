@@ -49,8 +49,8 @@ def record_audio(track_id, output_dir, duration, device_name=""):
         
         log(f"Using loopback device: {loopback.name}")
         
-        # We record in chunks to update progress
-        samplerate = 44100
+        # 48000 Hz matches Windows WASAPI & modern browser internal mixer natively
+        samplerate = 48000
         total_frames = int(samplerate * duration)
         frames_recorded = 0
         chunk_size = samplerate # 1 second chunks
@@ -70,7 +70,7 @@ def record_audio(track_id, output_dir, duration, device_name=""):
                 log(f"Recorded {current_time:.1f}/{duration:.1f}s")
                 
         audio_data = np.concatenate(all_data, axis=0)
-        sf.write(wav_filepath, audio_data, samplerate)
+        sf.write(wav_filepath, audio_data, samplerate, subtype='PCM_24')
         log(f"Saved to {wav_filepath}")
         
         write_progress(output_dir, track_id, "completed", duration, duration)

@@ -62,8 +62,9 @@ if not loopback:
 limit_str = f" (target: {max_tracks})" if max_tracks > 0 else ""
 write_status("listening", f"Waiting for audio to start...{limit_str}", 0, max_tracks)
 
-samplerate = 44100
-chunk_size = 4410 # 0.1 seconds
+# 48000 Hz matches Windows WASAPI & modern browser internal mixer natively
+samplerate = 48000
+chunk_size = 4800 # 0.1 seconds (4800 frames)
 # silence_threshold = 0.008 ensures true audio gaps are caught even with slight background DAC noise
 silence_threshold = 0.008 
 silence_duration = max(0.5, gap_seconds)
@@ -208,7 +209,8 @@ try:
                     import threading
                     def save_track_async(file_path, data, rate):
                         try:
-                            sf.write(file_path, data, rate)
+                            # Save as 24-bit PCM WAV (studio master quality, no clipping)
+                            sf.write(file_path, data, rate, subtype='PCM_24')
                         except Exception as err:
                             with open(os.path.join(output_dir, "error.log"), "a") as f:
                                 f.write(f"Save error: {err}\n")
