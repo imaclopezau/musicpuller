@@ -50,68 +50,7 @@ def set_download_dir(path):
 app = Flask(__name__)
 app.secret_key = 'super_secret_key' # Needed for flash messages
 
-@app.after_request
-def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-    return response
-
 active_process = None
-
-@app.route('/save_stream', methods=['POST', 'OPTIONS'])
-def save_stream():
-    if request.method == 'OPTIONS':
-        return jsonify({"status": "ok"})
-
-    data = request.get_json(silent=True) or {}
-    stream_url = data.get('stream_url', '').strip()
-    title = data.get('title', '').strip() or 'Suno_Track'
-    cookies = data.get('cookies', {})
-
-    if not stream_url:
-        return jsonify({"error": "No stream_url provided"}), 400
-
-    music_dir = get_download_dir()
-    os.makedirs(music_dir, exist_ok=True)
-
-    # Clean title for filename
-    clean_title = re.sub(r'[\\/*?:"<>|]', "", title).strip()
-    ext = ".mp3"
-    if ".wav" in stream_url.lower():
-        ext = ".wav"
-    elif ".m4a" in stream_url.lower():
-        ext = ".m4a"
-
-    target_path = os.path.join(music_dir, f"{clean_title}{ext}")
-
-    try:
-        session = requests.Session()
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Referer": "https://suno.com/"
-        })
-        if cookies:
-            session.cookies.update(cookies)
-
-        r = session.get(stream_url, stream=True, timeout=30)
-        if r.status_code != 200:
-            return jsonify({"error": f"CDN returned status {r.status_code}"}), 400
-
-        with open(target_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=65536):
-                if chunk:
-                    f.write(chunk)
-
-        file_size = os.path.getsize(target_path)
-        return jsonify({
-            "status": "saved",
-            "filename": f"{clean_title}{ext}",
-            "file_size": file_size,
-            "path": target_path
-        })
-    except Exception as e:
-        return jsonify({"error": f"Failed to save stream: {str(e)}"}), 500
 
 @app.route('/')
 def index():
