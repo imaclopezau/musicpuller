@@ -1,7 +1,36 @@
-// MusicPuller Content Script for Suno.com
-// Injects a lossless "⬇ Lossless" button directly into Suno's active player & track items
+// Visible indicator on page showing extension is connected
+function ensureIndicator() {
+  if (document.getElementById('musicpuller-indicator')) return;
+  const indicator = document.createElement('div');
+  indicator.id = 'musicpuller-indicator';
+  indicator.style.cssText = `
+    position: fixed;
+    top: 12px;
+    right: 180px;
+    background: rgba(0, 0, 0, 0.85);
+    color: #ff5e00;
+    border: 1px solid #ff5e00;
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-family: sans-serif;
+    font-weight: bold;
+    z-index: 999999;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+    cursor: default;
+  `;
+  indicator.innerHTML = `<span>🎵</span> MusicPuller: <span id="musicpuller-ind-status" style="color: #00ff88;">Listening</span>`;
+  document.body.appendChild(indicator);
+}
 
-console.log("[MusicPuller] Suno Companion loaded.");
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', ensureIndicator);
+} else {
+  ensureIndicator();
+}
 
 let currentPlayingTitle = "";
 
