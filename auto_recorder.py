@@ -212,6 +212,13 @@ try:
                     import threading
                     def save_track_async(file_path, data, rate):
                         try:
+                            # Automatic Peak Normalization: Normalize audio to -0.3 dBFS so tracks are full, crisp, and properly loud
+                            max_val = np.max(np.abs(data))
+                            if max_val > 0.001:
+                                target_peak = 0.966 # -0.3 dBFS headroom to prevent inter-sample clipping
+                                gain = target_peak / max_val
+                                data = data * gain
+
                             # Save as 24-bit PCM WAV (studio master quality, no clipping)
                             sf.write(file_path, data, rate, subtype='PCM_24')
                         except Exception as err:

@@ -70,6 +70,13 @@ def record_audio(track_id, output_dir, duration, device_name=""):
                 log(f"Recorded {current_time:.1f}/{duration:.1f}s")
                 
         audio_data = np.concatenate(all_data, axis=0)
+        # Automatic Peak Normalization: Normalize audio to -0.3 dBFS so tracks are full, crisp, and properly loud
+        max_val = np.max(np.abs(audio_data))
+        if max_val > 0.001:
+            target_peak = 0.966
+            gain = target_peak / max_val
+            audio_data = audio_data * gain
+
         sf.write(wav_filepath, audio_data, samplerate, subtype='PCM_24')
         log(f"Saved to {wav_filepath}")
         
