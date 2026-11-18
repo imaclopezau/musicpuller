@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Suno Auto-Recorder</title>
+    <!-- Tesseract.js for in-browser Optical Character Recognition -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -11,9 +13,11 @@
             color: #ffffff;
             display: flex;
             justify-content: center;
-            align-items: center;
-            height: 100vh;
+            align-items: flex-start;
+            min-height: 100vh;
             margin: 0;
+            padding: 30px 15px;
+            box-sizing: border-box;
         }
         .container {
             background-color: #1e1e1e;
@@ -21,8 +25,9 @@
             border-radius: 12px;
             box-shadow: 0 8px 16px rgba(0,0,0,0.5);
             width: 100%;
-            max-width: 500px;
+            max-width: 540px;
             text-align: center;
+            box-sizing: border-box;
         }
         h1 {
             margin-top: 0;
@@ -97,14 +102,114 @@
         <small style="color: #888; display: block; margin-top: 5px;">Select the device where you hear the music.</small>
     </div>
 
-    <button type="button" id="start-btn">Start Auto-Recorder</button>
-    <button type="button" id="stop-btn">Stop Auto-Recorder</button>
+    <div style="margin-bottom: 20px; text-align: left;">
+        <label for="download_dir" style="color: #ccc; font-size: 14px; display: block; margin-bottom: 8px;">Download Folder:</label>
+        <div style="display: flex; gap: 8px;">
+            <input type="text" id="download_dir" name="download_dir" style="flex: 1; padding: 12px; border: 1px solid #333; background-color: #2a2a2a; color: #fff; border-radius: 6px; box-sizing: border-box;" placeholder="e.g. C:\Music\Suno">
+            <button type="button" id="save-dir-btn" style="width: auto; padding: 12px 18px; margin: 0; font-size: 14px; white-space: nowrap;">Set Folder</button>
+        </div>
+        <small id="dir-status-text" style="color: #888; display: block; margin-top: 5px;">Saved tracks will be stored in this directory.</small>
+    </div>
+
+    <div style="margin-bottom: 20px; text-align: left;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label for="gemini_api_key" style="color: #ccc; font-size: 14px;">Gemini API Key (Optional for AI Clean):</label>
+            <span id="api-key-status" style="font-size: 11px; color: #888;"></span>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <input type="password" id="gemini_api_key" placeholder="AIzaSy... (free key from aistudio.google.com)" style="flex: 1; padding: 10px 12px; border: 1px solid #333; background-color: #2a2a2a; color: #fff; border-radius: 6px; font-size: 13px;">
+            <button type="button" id="save-key-btn" style="width: auto; padding: 10px 16px; margin: 0; font-size: 13px; background-color: #444; white-space: nowrap;">Save Key</button>
+        </div>
+    </div>
+    <div class="tabs" style="display: flex; margin-bottom: 20px;">
+        <button id="tab-playlist" style="flex: 1; margin: 0 5px 0 0; background-color: #ff5e00;">Playlist Mode</button>
+        <button id="tab-manual" style="flex: 1; margin: 0 0 0 5px; background-color: #333;">Manual Mode</button>
+    </div>
+
+    <div id="playlist-section">
+        <p style="margin-bottom: 10px;">Paste up to 10 Suno links below (one per line). The app will automatically open them, click play, and record the audio!</p>
+        <textarea id="playlist-links" rows="6" style="width: 100%; box-sizing: border-box; padding: 10px; background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 6px; margin-bottom: 15px;" placeholder="https://suno.com/song/...\nhttps://suno.com/song/..."></textarea>
+        <button type="button" id="start-playlist-btn">Start Playlist</button>
+        
+        <div id="playlist-status-container" style="background-color: #333; padding: 15px; border-radius: 6px; margin-top: 15px; text-align: left; display: none;">
+            <p id="playlist-status-text" style="color: #ff5e00; font-weight: bold; margin: 0 0 5px 0;">Playlist Status:</p>
+            <p id="playlist-status-details" style="color: #ccc; margin: 0; font-size: 14px;">Initializing...</p>
+        </div>
+    </div>
+    
+    <div id="manual-section" style="display: none;">
+        <p>Browse Suno manually. When music plays, tracks are automatically recorded and saved.</p>
+        
+        <!-- Image Paste / OCR Section -->
+        <div style="margin-bottom: 20px; text-align: left; background: #262626; padding: 15px; border-radius: 8px; border: 1px dashed #555;">
+            <label style="color: #ff5e00; font-size: 14px; font-weight: bold; display: block; margin-bottom: 6px;">📷 Paste Screenshot of Tracklist (Ctrl+V):</label>
+            <p style="font-size: 12px; color: #aaa; margin: 0 0 10px 0;">Take a screenshot of your tracklist, click below, and press <b>Ctrl+V</b> to extract the names automatically.</p>
+            
+            <div id="paste-dropzone" tabindex="0" style="padding: 16px; border: 2px dashed #444; border-radius: 6px; text-align: center; cursor: pointer; background: #1a1a1a; outline: none; transition: border-color 0.2s;">
+                <span id="paste-prompt-text" style="color: #888; font-size: 13px;">📋 Click here and press <b>Ctrl+V</b> or click to upload an image</span>
+                <input type="file" id="file-input" accept="image/*" style="display: none;">
+                <div id="ocr-loading" style="display: none; color: #ff5e00; font-size: 13px; margin-top: 8px;">⏳ Reading track names from image... (<span id="ocr-pct">0%</span>)</div>
+            </div>
+
+            <div id="paste-preview-container" style="display: none; margin-top: 10px; text-align: center;">
+                <img id="paste-preview-img" style="max-width: 100%; max-height: 140px; border-radius: 6px; border: 1px solid #444;" alt="Pasted tracklist">
+            </div>
+
+            <div style="margin-top: 15px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <label style="color: #ff5e00; font-size: 14px; font-weight: bold;">Extracted Track Names:</label>
+                    <span id="track-names-count" style="font-size: 12px; background: #333; padding: 2px 8px; border-radius: 12px; color: #00ff88; font-weight: bold;">0 tracks</span>
+                </div>
+                
+                <!-- Individual Editable Track Items List -->
+                <div id="track-items-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; margin-bottom: 10px; padding-right: 4px;">
+                    <div id="no-tracks-hint" style="color: #777; font-size: 13px; font-style: italic; text-align: center; padding: 12px; border: 1px dashed #333; border-radius: 6px;">
+                        No tracks added yet. Paste a screenshot above or click "+ Add Track" below.
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                    <button type="button" id="ai-clean-btn" style="flex: 1; padding: 8px; background: #6200ea; border: 1px solid #7c4dff; font-size: 13px; margin: 0; color: #fff;">✨ Clean with AI</button>
+                    <button type="button" id="add-track-btn" style="flex: 1; padding: 8px; background: #2a2a2a; border: 1px solid #444; font-size: 13px; margin: 0;">➕ Add Track</button>
+                    <button type="button" id="clear-tracks-btn" style="width: auto; padding: 8px 12px; background: #2a2a2a; border: 1px solid #444; color: #ff6666; font-size: 13px; margin: 0;">Clear All</button>
+                </div>
+
+                <!-- Hidden backing textarea to keep form submission and raw editing synchronized -->
+                <textarea id="track_names" style="display: none;"></textarea>
+                <small style="color: #888; display: block;">You can directly click any track name above to edit it or delete/reorder.</small>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-bottom: 15px; text-align: left;">
+            <div style="flex: 1;">
+                <label for="max_tracks" style="color: #ccc; font-size: 13px; display: block; margin-bottom: 6px;">Stop after (tracks):</label>
+                <input type="number" id="max_tracks" name="max_tracks" min="0" placeholder="0 = Unlimited" style="width: 100%; padding: 10px; border: 1px solid #333; background-color: #2a2a2a; color: #fff; border-radius: 6px; box-sizing: border-box;">
+            </div>
+            <div style="flex: 1;">
+                <label for="gap_seconds" style="color: #ccc; font-size: 13px; display: block; margin-bottom: 6px;">Track Gap Detection:</label>
+                <select id="gap_seconds" name="gap_seconds" style="width: 100%; padding: 10px; border: 1px solid #333; background-color: #2a2a2a; color: #fff; border-radius: 6px; box-sizing: border-box;">
+                    <option value="1.0">Ultra-fast (1.0 sec)</option>
+                    <option value="1.5" selected>Standard (1.5 sec)</option>
+                    <option value="2.0">Normal (2.0 sec)</option>
+                    <option value="3.0">Long (3.0 sec)</option>
+                </select>
+            </div>
+        </div>
+
+        <button type="button" id="start-btn">Start Auto-Recorder</button>
+    </div>
+
+    <div id="recording-actions" style="display: none; gap: 8px; margin-bottom: 10px;">
+        <button type="button" id="cut-btn" style="flex: 1; background-color: #28a745; margin: 0; padding: 12px 14px; font-size: 15px;">💾 Save & Next Track</button>
+        <button type="button" id="stop-btn" style="flex: 1; background-color: #ff4444; margin: 0; padding: 12px 14px; font-size: 15px;">⏹ Stop & Save All</button>
+    </div>
     
     <div style="margin-top: 15px;">
         <a href="/player" style="color: #ff5e00; text-decoration: none;">View Player Library</a>
     </div>
 
-    <div id="status-container">
+    <div id="status-container" style="margin-top: 20px;">
+        <p style="color: #888; font-size: 12px; text-transform: uppercase; margin: 0 0 5px 0;">Core Recorder Status</p>
         <p id="status-text">Status: Stopped</p>
         <p id="status-details">Not listening.</p>
     </div>
@@ -112,6 +217,89 @@
 
 <script>
     let pollInterval = null;
+    let playlistPollInterval = null;
+
+    // Tabs logic
+    document.getElementById('tab-playlist').addEventListener('click', () => {
+        document.getElementById('playlist-section').style.display = 'block';
+        document.getElementById('manual-section').style.display = 'none';
+        document.getElementById('tab-playlist').style.backgroundColor = '#ff5e00';
+        document.getElementById('tab-manual').style.backgroundColor = '#333';
+    });
+    
+    document.getElementById('tab-manual').addEventListener('click', () => {
+        document.getElementById('playlist-section').style.display = 'none';
+        document.getElementById('manual-section').style.display = 'block';
+        document.getElementById('tab-manual').style.backgroundColor = '#ff5e00';
+        document.getElementById('tab-playlist').style.backgroundColor = '#333';
+    });
+
+    // Load & Save download directory
+    async function loadSettings() {
+        try {
+            const res = await fetch('/settings');
+            const data = await res.json();
+            if (data.download_dir) {
+                document.getElementById('download_dir').value = data.download_dir;
+            }
+            if (data.gemini_api_key) {
+                document.getElementById('gemini_api_key').value = data.gemini_api_key;
+            }
+            const keyStatus = document.getElementById('api-key-status');
+            if (data.has_api_key) {
+                keyStatus.textContent = '✓ Configured';
+                keyStatus.style.color = '#00ff88';
+            } else {
+                keyStatus.textContent = 'No key set';
+                keyStatus.style.color = '#888';
+            }
+        } catch (e) {
+            console.error("Failed to load settings", e);
+        }
+    }
+    loadSettings();
+
+    document.getElementById('save-key-btn').addEventListener('click', async () => {
+        const keyVal = document.getElementById('gemini_api_key').value.trim();
+        const keyStatus = document.getElementById('api-key-status');
+        const formData = new FormData();
+        formData.append('gemini_api_key', keyVal);
+        try {
+            const res = await fetch('/settings', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (res.ok) {
+                keyStatus.textContent = data.has_api_key ? '✓ Key Saved!' : 'Key Cleared';
+                keyStatus.style.color = data.has_api_key ? '#00ff88' : '#888';
+            }
+        } catch (e) {
+            alert('Failed to save key: ' + e.message);
+        }
+    });
+
+    document.getElementById('save-dir-btn').addEventListener('click', async () => {
+        const dirVal = document.getElementById('download_dir').value.trim();
+        const statusEl = document.getElementById('dir-status-text');
+        const formData = new FormData();
+        formData.append('download_dir', dirVal);
+        try {
+            const res = await fetch('/settings', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (res.ok) {
+                statusEl.textContent = `✓ Folder saved: ${data.download_dir}`;
+                statusEl.style.color = '#00ff88';
+                setTimeout(() => {
+                    statusEl.textContent = 'Saved tracks will be stored in this directory.';
+                    statusEl.style.color = '#888';
+                }, 4000);
+            } else {
+                statusEl.textContent = `Error: ${data.message || 'Could not set folder'}`;
+                statusEl.style.color = '#ff4444';
+            }
+        } catch (e) {
+            statusEl.textContent = `Error: ${e.message}`;
+            statusEl.style.color = '#ff4444';
+        }
+    });
 
     // Fetch devices on load
     async function loadDevices() {
@@ -141,14 +329,11 @@
             const stText = document.getElementById('status-text');
             const stDetails = document.getElementById('status-details');
             
-            if (data.state === 'stopped' || data.state === 'error') {
-                document.getElementById('start-btn').style.display = 'block';
-                document.getElementById('stop-btn').style.display = 'none';
-                clearInterval(pollInterval);
-                pollInterval = null;
+            const recordingActions = document.getElementById('recording-actions');
+            if (data.state === 'stopped' || data.state === 'error' || data.state === 'completed') {
+                recordingActions.style.display = 'none';
             } else {
-                document.getElementById('start-btn').style.display = 'none';
-                document.getElementById('stop-btn').style.display = 'block';
+                recordingActions.style.display = 'flex';
             }
             
             stText.textContent = `Status: ${data.state.charAt(0).toUpperCase() + data.state.slice(1)}`;
@@ -160,6 +345,8 @@
                 stText.style.color = '#ff5e00';
             } else if (data.state === 'saving') {
                 stText.style.color = '#ffff00';
+            } else if (data.state === 'completed') {
+                stText.style.color = '#00ff88';
             } else {
                 stText.style.color = '#ffffff';
             }
@@ -167,25 +354,491 @@
             console.error(e);
         }
     }
+    
+    async function pollPlaylistStatus() {
+        try {
+            const res = await fetch('/playlist_status');
+            const data = await res.json();
+            
+            const pCont = document.getElementById('playlist-status-container');
+            const pDetails = document.getElementById('playlist-status-details');
+            
+            if (data.status === 'Stopped') {
+                pCont.style.display = 'none';
+            } else {
+                pCont.style.display = 'block';
+                pDetails.textContent = data.status;
+                if (data.status === 'Done') {
+                    pDetails.style.color = '#00ff00';
+                    setTimeout(() => { pCont.style.display = 'none'; }, 5000);
+                } else {
+                    pDetails.style.color = '#ccc';
+                }
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    // Track Names UI management
+    let trackList = [];
+    const trackItemsList = document.getElementById('track-items-list');
+    const trackNamesArea = document.getElementById('track_names');
+    const trackCountSpan = document.getElementById('track-names-count');
+    const maxTracksInput = document.getElementById('max_tracks');
+    const addTrackBtn = document.getElementById('add-track-btn');
+    const clearTracksBtn = document.getElementById('clear-tracks-btn');
+
+    function syncTrackListToArea() {
+        const validItems = trackList.filter(t => (t.name || '').trim().length > 0);
+        trackNamesArea.value = JSON.stringify(validItems);
+        trackCountSpan.textContent = `${validItems.length} track${validItems.length === 1 ? '' : 's'}`;
+        if (validItems.length > 0) {
+            maxTracksInput.value = validItems.length;
+        }
+    }
+
+    function renderTrackItems() {
+        trackItemsList.innerHTML = '';
+        if (trackList.length === 0) {
+            trackItemsList.innerHTML = `
+                <div id="no-tracks-hint" style="color: #777; font-size: 13px; font-style: italic; text-align: center; padding: 12px; border: 1px dashed #333; border-radius: 6px;">
+                    No tracks added yet. Paste a screenshot above or click "+ Add Track" below.
+                </div>`;
+            syncTrackListToArea();
+            return;
+        }
+
+        trackList.forEach((track, index) => {
+            const itemObj = typeof track === 'object' ? track : { name: track, duration: 0 };
+            trackList[index] = itemObj;
+
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.gap = '6px';
+            row.style.background = '#1a1a1a';
+            row.style.padding = '5px 8px';
+            row.style.borderRadius = '6px';
+            row.style.border = '1px solid #333';
+
+            const num = document.createElement('span');
+            num.textContent = `#${index + 1}`;
+            num.style.color = '#ff5e00';
+            num.style.fontWeight = 'bold';
+            num.style.fontSize = '12px';
+            num.style.minWidth = '24px';
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = itemObj.name;
+            input.style.flex = '1';
+            input.style.background = 'transparent';
+            input.style.border = 'none';
+            input.style.color = '#ffffff';
+            input.style.fontSize = '13px';
+            input.style.outline = 'none';
+            input.placeholder = `Track ${index + 1} Name`;
+            input.addEventListener('input', (e) => {
+                trackList[index].name = e.target.value;
+                syncTrackListToArea();
+            });
+
+            // Duration field (Editable badge)
+            const durContainer = document.createElement('div');
+            durContainer.style.cssText = 'display: flex; align-items: center; background: #262626; border: 1px solid #444; border-radius: 4px; padding: 2px 6px; margin: 0 4px;';
+            
+            const durIcon = document.createElement('span');
+            durIcon.textContent = '⏱';
+            durIcon.style.fontSize = '12px';
+            durIcon.style.marginRight = '4px';
+
+            const durInput = document.createElement('input');
+            durInput.type = 'text';
+            const mins = Math.floor(itemObj.duration / 60);
+            const secs = itemObj.duration % 60;
+            durInput.value = itemObj.duration > 0 ? `${mins}:${secs < 10 ? '0' : ''}${secs}` : '0:00';
+            durInput.style.cssText = 'width: 42px; background: transparent; border: none; color: #00ff88; font-size: 12px; font-weight: bold; text-align: center; outline: none;';
+            durInput.title = 'Track duration (e.g. 3:37). Auto-cuts when reached!';
+            durInput.placeholder = 'm:ss';
+
+            durInput.addEventListener('change', (e) => {
+                const val = e.target.value.trim();
+                const m = val.match(/^(\d{1,2}):(\d{2})$/);
+                if (m) {
+                    trackList[index].duration = parseInt(m[1]) * 60 + parseInt(m[2]);
+                } else if (/^\d+$/.test(val)) {
+                    trackList[index].duration = parseInt(val);
+                } else {
+                    trackList[index].duration = 0;
+                }
+                syncTrackListToArea();
+            });
+
+            durContainer.appendChild(durIcon);
+            durContainer.appendChild(durInput);
+
+            // Move Up button
+            const upBtn = document.createElement('button');
+            upBtn.type = 'button';
+            upBtn.textContent = '▲';
+            upBtn.title = 'Move up';
+            upBtn.style.cssText = 'width: 26px; height: 26px; padding: 0; margin: 0; background: #2a2a2a; border: 1px solid #444; font-size: 11px; cursor: pointer; border-radius: 4px;';
+            upBtn.disabled = index === 0;
+            if (index === 0) upBtn.style.opacity = '0.3';
+            upBtn.addEventListener('click', () => {
+                if (index > 0) {
+                    const temp = trackList[index];
+                    trackList[index] = trackList[index - 1];
+                    trackList[index - 1] = temp;
+                    renderTrackItems();
+                }
+            });
+
+            // Move Down button
+            const downBtn = document.createElement('button');
+            downBtn.type = 'button';
+            downBtn.textContent = '▼';
+            downBtn.title = 'Move down';
+            downBtn.style.cssText = 'width: 26px; height: 26px; padding: 0; margin: 0; background: #2a2a2a; border: 1px solid #444; font-size: 11px; cursor: pointer; border-radius: 4px;';
+            downBtn.disabled = index === trackList.length - 1;
+            if (index === trackList.length - 1) downBtn.style.opacity = '0.3';
+            downBtn.addEventListener('click', () => {
+                if (index < trackList.length - 1) {
+                    const temp = trackList[index];
+                    trackList[index] = trackList[index + 1];
+                    trackList[index + 1] = temp;
+                    renderTrackItems();
+                }
+            });
+
+            // Delete button
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.textContent = '✕';
+            delBtn.title = 'Remove track';
+            delBtn.style.cssText = 'width: 26px; height: 26px; padding: 0; margin: 0; background: #3a1a1a; border: 1px solid #552222; color: #ff6666; font-size: 12px; cursor: pointer; border-radius: 4px;';
+            delBtn.addEventListener('click', () => {
+                trackList.splice(index, 1);
+                renderTrackItems();
+            });
+
+            row.appendChild(num);
+            row.appendChild(input);
+            row.appendChild(durContainer);
+            row.appendChild(upBtn);
+            row.appendChild(downBtn);
+            row.appendChild(delBtn);
+            trackItemsList.appendChild(row);
+        });
+
+        syncTrackListToArea();
+    }
+
+    addTrackBtn.addEventListener('click', () => {
+        trackList.push({ name: `Track ${trackList.length + 1}`, duration: 0 });
+        renderTrackItems();
+        const inputs = trackItemsList.querySelectorAll('input[type="text"]');
+        if (inputs.length > 0) {
+            inputs[inputs.length - 1].focus();
+            inputs[inputs.length - 1].select();
+        }
+    });
+
+    clearTracksBtn.addEventListener('click', () => {
+        if (trackList.length > 0 && confirm('Clear all track names in the list?')) {
+            trackList = [];
+            renderTrackItems();
+        }
+    });
+
+    // Image paste & OCR Handling
+    const dropzone = document.getElementById('paste-dropzone');
+    const fileInput = document.getElementById('file-input');
+    const ocrLoading = document.getElementById('ocr-loading');
+    const ocrPct = document.getElementById('ocr-pct');
+    const promptText = document.getElementById('paste-prompt-text');
+    const previewContainer = document.getElementById('paste-preview-container');
+    const previewImg = document.getElementById('paste-preview-img');
+
+    dropzone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files[0]) {
+            processImageFile(e.target.files[0]);
+        }
+    });
+
+    dropzone.addEventListener('focus', () => {
+        dropzone.style.borderColor = '#ff5e00';
+    });
+    dropzone.addEventListener('blur', () => {
+        dropzone.style.borderColor = '#444';
+    });
+
+    // Global and dropzone paste listener
+    window.addEventListener('paste', (e) => {
+        // Only trigger if in manual tab or dropzone focused
+        if (document.getElementById('manual-section').style.display !== 'none') {
+            const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            for (let item of items) {
+                if (item.type.indexOf('image') !== -1) {
+                    const blob = item.getAsFile();
+                    processImageFile(blob);
+                    e.preventDefault();
+                    break;
+                }
+            }
+        }
+    });
+
+    // Drag and drop support
+    dropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropzone.style.borderColor = '#ff5e00';
+    });
+    dropzone.addEventListener('dragleave', () => {
+        dropzone.style.borderColor = '#444';
+    });
+    dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.style.borderColor = '#444';
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            processImageFile(e.dataTransfer.files[0]);
+        }
+    });
+
+    let currentPastedImageData = null;
+
+    async function processImageFile(file) {
+        if (!file || !file.type.startsWith('image/')) return;
+        
+        promptText.style.display = 'none';
+        ocrLoading.style.display = 'block';
+
+        // Read image as Data URL for preview and direct Gemini Vision input
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const dataUrl = e.target.result;
+            currentPastedImageData = dataUrl;
+            previewImg.src = dataUrl;
+            previewContainer.style.display = 'block';
+
+            const keyVal = document.getElementById('gemini_api_key').value.trim();
+
+            // PREFERRED & ULTRA-ACCURATE: Send directly to Gemini 2.5 Flash Vision
+            if (keyVal) {
+                ocrLoading.textContent = '✨ AI is analyzing image and reading tracks & durations...';
+                try {
+                    const res = await fetch('/clean_with_ai', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            image_b64: dataUrl,
+                            mime_type: file.type || 'image/png',
+                            api_key: keyVal 
+                        })
+                    });
+                    const data = await res.json();
+                    if (res.ok && data.tracks && data.tracks.length > 0) {
+                        trackList = data.tracks;
+                        renderTrackItems();
+                        ocrLoading.style.display = 'none';
+                        promptText.style.display = 'inline';
+                        return; // Successfully processed with Gemini Vision!
+                    } else {
+                        console.warn("AI vision error, falling back to OCR:", data.error);
+                    }
+                } catch (aiErr) {
+                    console.warn("AI vision request failed, falling back to local OCR:", aiErr);
+                }
+            }
+
+            // FALLBACK: Local Tesseract.js OCR if no API key or vision call failed
+            ocrLoading.innerHTML = '⏳ Reading track names with OCR... (<span id="ocr-pct">0%</span>)';
+            try {
+                const worker = await Tesseract.createWorker('eng');
+                const ret = await worker.recognize(file);
+                await worker.terminate();
+
+                const lastRawText = ret.data.text;
+                cleanAndPopulateTrackNames(lastRawText);
+            } catch (err) {
+                console.error("OCR Error:", err);
+                alert("Could not read image: " + err.message);
+            } finally {
+                ocrLoading.style.display = 'none';
+                ocrLoading.innerHTML = '⏳ Reading track names from image... (<span id="ocr-pct">0%</span>)';
+                promptText.style.display = 'inline';
+            }
+        };
+        reader.readAsDataURL(file);
+    }
+
+    async function runAiClean(rawTextToClean, key, showAlert=true) {
+        const aiBtn = document.getElementById('ai-clean-btn');
+        const origText = aiBtn.textContent;
+        aiBtn.textContent = '⏳ AI Cleaning...';
+        aiBtn.disabled = true;
+
+        try {
+            const bodyPayload = currentPastedImageData 
+                ? { image_b64: currentPastedImageData, api_key: key }
+                : { raw_text: rawTextToClean, api_key: key };
+
+            const res = await fetch('/clean_with_ai', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(bodyPayload)
+            });
+            const data = await res.json();
+            if (res.ok && data.tracks && data.tracks.length > 0) {
+                trackList = data.tracks;
+                renderTrackItems();
+                if (showAlert) alert(`✓ Successfully extracted with AI! Found ${data.tracks.length} track(s).`);
+            } else if (showAlert) {
+                alert(data.error || "AI could not find tracks.");
+            }
+        } catch (e) {
+            if (showAlert) alert("AI Clean error: " + e.message);
+        } finally {
+            aiBtn.textContent = origText;
+            aiBtn.disabled = false;
+        }
+    }
+
+    document.getElementById('ai-clean-btn').addEventListener('click', () => {
+        const keyVal = document.getElementById('gemini_api_key').value.trim();
+        if (!keyVal) {
+            alert("Please enter a Gemini API Key in the settings field above to use AI cleaning!");
+            document.getElementById('gemini_api_key').focus();
+            return;
+        }
+        // Build raw text from existing items if needed
+        const raw = trackList.map(t => t.name).join('\n');
+        runAiClean(raw, keyVal, true);
+    });
+
+    function cleanAndPopulateTrackNames(rawText) {
+        const rawLines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        let extractedItems = [];
+        let curTitle = '';
+        let curDur = 0;
+
+        for (let i = 0; i < rawLines.length; i++) {
+            let line = rawLines[i].trim();
+            // Remove OCR artifacts like '«', '»', '“', '”', '®', '©', leading numbers, etc.
+            line = line.replace(/^[«»“”"®©\d\s\-\.\)]+/, '').replace(/[«»“”"®©]+/, '').trim();
+            const lower = line.toLowerCase();
+            
+            // Skip Suno UI chrome and tags
+            const ignoredWords = ['play', 'pause', 'share', 'more', 'suno', 'create', 'library', 'explore', 'credits', 'filters', 'workspaces', 'today', 'my songs', 'visuals', 'remix', 'all male group', 'cover', 'v8', 'v7', 'v6', 'styles'];
+            if (ignoredWords.some(w => lower === w || lower.startsWith(w + ' '))) continue;
+            // Skip short noisy fragments like "Pon", "dam ww 2 Ase", etc.
+            if (line.length < 3) continue;
+
+            const timeMatch = line.match(/\b(\d{1,2}):(\d{2})\b/);
+            if (timeMatch) {
+                const totalSec = parseInt(timeMatch[1]) * 60 + parseInt(timeMatch[2]);
+                const titlePart = line.replace(/\b\d{1,2}:\d{2}\b/, '').replace(/[\|\-\(\)]*$/, '').trim();
+                
+                if (titlePart.length > 3) {
+                    extractedItems.push({ name: titlePart, duration: totalSec });
+                    curTitle = '';
+                } else if (curTitle) {
+                    extractedItems.push({ name: curTitle, duration: totalSec });
+                    curTitle = '';
+                } else {
+                    curDur = totalSec;
+                }
+            } else {
+                // If this is a real song title line
+                if (line.includes(' - ') || line.length > 8) {
+                    if (curTitle) {
+                        extractedItems.push({ name: curTitle, duration: curDur });
+                        curDur = 0;
+                    }
+                    curTitle = line;
+                }
+            }
+        }
+        if (curTitle) {
+            extractedItems.push({ name: curTitle, duration: curDur });
+        }
+
+        if (extractedItems.length > 0) {
+            extractedItems.forEach(item => {
+                if (!trackList.some(t => t.name === item.name)) {
+                    trackList.push(item);
+                }
+            });
+            renderTrackItems();
+        } else {
+            // Fallback: If OCR didn't catch structured items, just push whatever lines exist
+            rawLines.forEach(l => {
+                if (l.length > 3) trackList.push({ name: l, duration: 0 });
+            });
+            renderTrackItems();
+        }
+    }
 
     document.getElementById('start-btn').addEventListener('click', async () => {
         const device = document.getElementById('device_name').value;
+        const dir = document.getElementById('download_dir').value.trim();
+        const maxTracks = document.getElementById('max_tracks').value.trim();
+        const trackNames = document.getElementById('track_names').value.trim();
+        const gapSeconds = document.getElementById('gap_seconds').value;
+        
         const formData = new FormData();
         formData.append('device_name', device);
+        if (dir) formData.append('download_dir', dir);
+        if (maxTracks) formData.append('max_tracks', maxTracks);
+        if (trackNames) formData.append('track_names', trackNames);
+        if (gapSeconds) formData.append('gap_seconds', gapSeconds);
         
         try {
             await fetch('/start_auto', { method: 'POST', body: formData });
-            document.getElementById('start-btn').style.display = 'none';
             document.getElementById('stop-btn').style.display = 'block';
             
             document.getElementById('status-text').textContent = "Status: Starting...";
             document.getElementById('status-details').textContent = "Connecting to device...";
-            
-            if (!pollInterval) {
-                pollInterval = setInterval(pollStatus, 1000);
-            }
         } catch (e) {
             alert("Error starting recorder: " + e.message);
+        }
+    });
+
+    document.getElementById('start-playlist-btn').addEventListener('click', async () => {
+        const device = document.getElementById('device_name').value;
+        const links = document.getElementById('playlist-links').value;
+        const dir = document.getElementById('download_dir').value.trim();
+        
+        if (!links.trim()) {
+            alert("Please paste some links first!");
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('device_name', device);
+        formData.append('links', links);
+        if (dir) formData.append('download_dir', dir);
+        
+        try {
+            await fetch('/start_playlist', { method: 'POST', body: formData });
+            document.getElementById('stop-btn').style.display = 'block';
+            
+            document.getElementById('playlist-status-container').style.display = 'block';
+            document.getElementById('playlist-status-details').textContent = "Initializing Playlist...";
+            document.getElementById('playlist-status-details').style.color = '#ccc';
+        } catch (e) {
+            alert("Error starting playlist: " + e.message);
+        }
+    });
+
+    document.getElementById('cut-btn').addEventListener('click', async () => {
+        try {
+            await fetch('/cut_track', { method: 'POST' });
+            document.getElementById('status-details').textContent = "Finishing & saving current track...";
+        } catch (e) {
+            console.error("Error splitting track:", e);
         }
     });
 
@@ -193,7 +846,8 @@
         try {
             await fetch('/stop_auto', { method: 'POST' });
             document.getElementById('status-text').textContent = "Status: Stopping...";
-            document.getElementById('status-details').textContent = "Waiting for backend to halt...";
+            document.getElementById('status-details').textContent = "Flushing and saving recorded audio...";
+            document.getElementById('playlist-status-details').textContent = "Stopped by user.";
         } catch (e) {
             alert("Error stopping recorder: " + e.message);
         }
@@ -201,7 +855,9 @@
     
     // Check if it's already running on page load
     pollStatus();
-    pollInterval = setInterval(pollStatus, 1000);
+    pollPlaylistStatus();
+    setInterval(pollStatus, 1000);
+    setInterval(pollPlaylistStatus, 1000);
 </script>
 </body>
 </html>

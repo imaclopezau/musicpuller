@@ -73,19 +73,6 @@ def record_audio(track_id, output_dir, duration, device_name=""):
         sf.write(wav_filepath, audio_data, samplerate)
         log(f"Saved to {wav_filepath}")
         
-        write_progress(output_dir, track_id, "finalizing", duration, duration)
-        log("Converting to MP3...")
-        
-        ffmpeg_bin = r"C:\Users\Art\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.1-full_build\bin"
-        if ffmpeg_bin not in os.environ["PATH"]:
-            os.environ["PATH"] = ffmpeg_bin + os.pathsep + os.environ["PATH"]
-            
-        from pydub import AudioSegment
-        audio = AudioSegment.from_file(wav_filepath)
-        audio.export(mp3_filepath, format="mp3", bitrate="192k")
-        log(f"Exported to {mp3_filepath}")
-        
-        os.remove(wav_filepath)
         write_progress(output_dir, track_id, "completed", duration, duration)
         log("Done!")
         

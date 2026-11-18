@@ -281,19 +281,26 @@
 
     <div class="playlist-section">
         <div class="playlist-header">
-            <span>Your Tracks</span>
+            <div>
+                <span>Your Tracks</span>
+                {% if download_dir %}
+                <div style="font-size: 11px; color: var(--text-muted); font-weight: normal; margin-top: 3px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ download_dir }}">
+                    📁 {{ download_dir }}
+                </div>
+                {% endif %}
+            </div>
             <a href="/" class="back-link">Back to Downloader</a>
         </div>
         <ul class="playlist" id="playlist">
             {% if songs %}
                 {% for song in songs %}
-                <li class="playlist-item" data-src="/static/music/{{ song }}" data-title="{{ song }}">
+                <li class="playlist-item" data-src="/audio_file/{{ song }}" data-title="{{ song }}">
                     <span class="item-icon">🎵</span>
                     <span class="item-name">{{ song }}</span>
                 </li>
                 {% endfor %}
             {% else %}
-                <div class="empty-state">No downloaded tracks found. Go back and download some music!</div>
+                <div class="empty-state">No downloaded tracks found in folder. Go back and download some music!</div>
             {% endif %}
         </ul>
     </div>

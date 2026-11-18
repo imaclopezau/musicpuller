@@ -11,3 +11,6 @@ static/music/*.log
 static/music/*.flag
 node_modules/
 .DS_Store
+config.json
+test.json
+test_pw2.py
