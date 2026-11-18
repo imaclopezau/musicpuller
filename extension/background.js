@@ -7,27 +7,29 @@ let lastDetectedTrack = {
   timestamp: 0
 };
 
-// Listen for audio stream network requests from Suno CDNs
+// Listen for audio stream network requests from Suno CDNs or any audio resource
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
     const url = details.url;
-    // Check if this is an audio file from Suno CDN
-    if (url.includes('.mp3') || url.includes('.wav') || url.includes('.m4a') || url.includes('audiocdn') || url.includes('cdn1.suno.ai') || url.includes('cdn2.suno.ai')) {
-      if (details.type === 'media' || details.type === 'xmlhttprequest' || details.type === 'other') {
-        console.log("[MusicPuller] Captured direct audio stream:", url);
-        lastDetectedTrack.streamUrl = url;
-        lastDetectedTrack.timestamp = Date.now();
+    // Check if this is an audio file from Suno CDN or audio mime/extension
+    const isAudio = url.includes('.mp3') || url.includes('.wav') || url.includes('.m4a') || 
+                    url.includes('.opus') || url.includes('.webm') || url.includes('audiocdn') || 
+                    url.includes('cdn1.suno.ai') || url.includes('cdn2.suno.ai') || url.includes('/audio/');
 
-        // Notify active Suno tabs to pair with current song title
-        chrome.tabs.query({ active: true, url: "https://suno.com/*" }, (tabs) => {
-          if (tabs && tabs[0]) {
-            chrome.tabs.sendMessage(tabs[0].id, { type: "STREAM_DETECTED", url: url });
-          }
+    if (isAudio) {
+      console.log("[MusicPuller] Captured direct audio stream:", url);
+      lastDetectedTrack.streamUrl = url;
+      lastDetectedTrack.timestamp = Date.now();
+
+      // Notify all tabs on suno.com
+      chrome.tabs.query({ url: "*://*.suno.com/*" }, (tabs) => {
+        tabs.forEach((tab) => {
+          chrome.tabs.sendMessage(tab.id, { type: "STREAM_DETECTED", url: url }).catch(() => {});
         });
-      }
+      });
     }
   },
-  { urls: ["https://*.suno.ai/*", "https://*.suno.com/*"] }
+  { urls: ["<all_urls>"] }
 );
 
 // Listen for messages from content script or popup

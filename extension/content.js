@@ -33,19 +33,46 @@ function getCurrentPlayingTitle() {
 // Receive stream captured by background service worker
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "STREAM_DETECTED") {
-    currentPlayingTitle = getCurrentPlayingTitle();
-    console.log(`[MusicPuller] Stream captured for: "${currentPlayingTitle}" -> ${msg.url}`);
-    
-    // Automatically notify background to save to MusicPuller folder
-    chrome.runtime.sendMessage({
-      type: "SAVE_TRACK_TO_SERVER",
-      streamUrl: msg.url,
-      title: currentPlayingTitle
-    }, (res) => {
-      showToastNotification(`✓ Grabbed: ${currentPlayingTitle}`);
-    });
+    handleCapturedStream(msg.url);
   }
 });
+
+let processedUrls = new Set();
+
+function handleCapturedStream(url) {
+  if (!url || processedUrls.has(url)) return;
+  processedUrls.add(url);
+
+  currentPlayingTitle = getCurrentPlayingTitle();
+  console.log(`[MusicPuller] Handling stream for: "${currentPlayingTitle}" -> ${url}`);
+
+  chrome.runtime.sendMessage({
+    type: "SAVE_TRACK_TO_SERVER",
+    streamUrl: url,
+    title: currentPlayingTitle
+  }, (res) => {
+    showToastNotification(`✓ Grabbed: ${currentPlayingTitle}`);
+  });
+}
+
+// Active DOM Audio Sniffing: Hook into <audio> tags directly on Suno
+setInterval(() => {
+  const audios = document.querySelectorAll('audio');
+  audios.forEach((audio) => {
+    const src = audio.currentSrc || audio.src;
+    if (src && !src.startsWith('blob:') && (src.includes('.mp3') || src.includes('.wav') || src.includes('.m4a') || src.includes('cdn'))) {
+      if (!audio.__musicpuller_hooked) {
+        audio.__musicpuller_hooked = true;
+        audio.addEventListener('play', () => {
+          handleCapturedStream(audio.currentSrc || audio.src);
+        });
+      }
+      if (!audio.paused) {
+        handleCapturedStream(src);
+      }
+    }
+  });
+}, 1000);
 
 // Toast notification UI injected on suno.com
 function showToastNotification(text) {
