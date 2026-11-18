@@ -65,8 +65,8 @@ write_status("listening", f"Waiting for audio to start...{limit_str}", 0, max_tr
 # 48000 Hz matches Windows WASAPI & modern browser internal mixer natively
 samplerate = 48000
 chunk_size = 4800 # 0.1 seconds (4800 frames)
-# silence_threshold = 0.008 ensures true audio gaps are caught even with slight background DAC noise
-silence_threshold = 0.008 
+# silence_threshold = 0.002 ensures only true silence triggers a cut, not quiet musical passages
+silence_threshold = 0.002 
 silence_duration = max(0.5, gap_seconds)
 silence_chunks_limit = int(silence_duration / 0.1)
 
@@ -146,9 +146,12 @@ try:
                     write_status("recording", f"Recording {current_track_label}... ({elapsed_str}{dur_display})", recorded_count, max_tracks)
                 
                 # Check for natural silence gap
+                # Only check silence if audio has been playing for at least 30 seconds or if no target duration was set,
+                # to prevent a quiet song intro from triggering an early track cut!
                 if rms < silence_threshold:
                     silence_chunks += 1
-                    if silence_chunks > silence_chunks_limit:
+                    can_silence_cut = (target_track_sec == 0) or (elapsed_sec > 30)
+                    if silence_chunks > silence_chunks_limit and can_silence_cut:
                         break # Track finished naturally by silence
                 else:
                     silence_chunks = 0
