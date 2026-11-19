@@ -64,19 +64,38 @@ write_status("listening", f"Waiting for audio to start...{limit_str}", 0, max_tr
 
 # 48000 Hz matches Windows WASAPI & modern browser internal mixer natively
 samplerate = 48000
-chunk_size = 4800 # 0.1 seconds (4800 frames)
+chunk_size = 24000 # 0.5 seconds (24000 frames) - gives WASAPI plenty of buffer headroom
+chunk_duration = chunk_size / samplerate # 0.5s
 # silence_threshold = 0.002 ensures only true silence triggers a cut, not quiet musical passages
 silence_threshold = 0.002 
 silence_duration = max(0.5, gap_seconds)
-silence_chunks_limit = int(silence_duration / 0.1)
+silence_chunks_limit = max(1, int(round(silence_duration / chunk_duration)))
 
 # Ensure stop flag doesn't exist
 if os.path.exists(stop_flag):
     os.remove(stop_flag)
 
+import queue
+import threading
+
+audio_queue = queue.Queue(maxsize=100)
+capture_running = True
+
+def capture_worker(recorder_mic):
+    while capture_running:
+        try:
+            chunk = recorder_mic.record(numframes=chunk_size)
+            audio_queue.put(chunk, block=True, timeout=1.0)
+        except Exception:
+            if not capture_running:
+                break
+
 try:
     recorded_count = 0
     with loopback.recorder(samplerate=samplerate) as mic:
+        worker_thread = threading.Thread(target=capture_worker, args=(mic,), daemon=True)
+        worker_thread.start()
+
         while not os.path.exists(stop_flag):
             recording = False
             all_data = []
@@ -84,7 +103,10 @@ try:
             
             # Wait for audio to start
             while not os.path.exists(stop_flag):
-                data = mic.record(numframes=chunk_size)
+                try:
+                    data = audio_queue.get(timeout=0.5)
+                except queue.Empty:
+                    continue
                 rms = np.sqrt(np.mean(data**2))
                 if rms > silence_threshold:
                     recording = True
@@ -133,17 +155,20 @@ try:
                         pass
                     break
 
-                data = mic.record(numframes=chunk_size)
+                try:
+                    data = audio_queue.get(timeout=1.0)
+                except queue.Empty:
+                    continue
+
                 rms = np.sqrt(np.mean(data**2))
                 all_data.append(data)
                 frames_recorded += chunk_size
                 elapsed_sec = int(frames_recorded / samplerate)
                 
-                # Update status every second
-                if (frames_recorded / samplerate) % 1.0 < 0.1:
-                    elapsed_str = format_time(elapsed_sec)
-                    dur_display = f" / {format_time(target_track_sec)}" if target_track_sec > 0 else ""
-                    write_status("recording", f"Recording {current_track_label}... ({elapsed_str}{dur_display})", recorded_count, max_tracks)
+                # Update status periodically
+                elapsed_str = format_time(elapsed_sec)
+                dur_display = f" / {format_time(target_track_sec)}" if target_track_sec > 0 else ""
+                write_status("recording", f"Recording {current_track_label}... ({elapsed_str}{dur_display})", recorded_count, max_tracks)
                 
                 # Check for natural silence gap
                 # Only check silence if audio has been playing for at least 30 seconds or if no target duration was set,
@@ -221,6 +246,15 @@ try:
 
                             # Save as 24-bit PCM WAV (studio master quality, no clipping)
                             sf.write(file_path, data, rate, subtype='PCM_24')
+
+                            # Automated Broadcast Remastering & MP3 Conversion under Artist folder
+                            try:
+                                from mastering_pipeline import parse_title_and_artist, remaster_and_export
+                                parsed_track, parsed_artist = parse_title_and_artist(base_name)
+                                remaster_and_export(file_path, output_dir, parsed_track, parsed_artist)
+                            except Exception as master_err:
+                                with open(os.path.join(output_dir, "error.log"), "a") as f:
+                                    f.write(f"Mastering error for {base_name}: {master_err}\n")
                         except Exception as err:
                             with open(os.path.join(output_dir, "error.log"), "a") as f:
                                 f.write(f"Save error: {err}\n")
@@ -248,6 +282,7 @@ except Exception as e:
         f.write(f"Error: {e}\n")
     write_status("error", str(e))
 finally:
+    capture_running = False
     if os.path.exists(stop_flag):
         os.remove(stop_flag)
     # Only write stopped if we didn't just write an error

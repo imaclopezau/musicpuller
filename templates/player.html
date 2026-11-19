@@ -259,7 +259,20 @@
         
         <div class="track-info">
             <div class="track-title" id="current-title">Select a track</div>
-            <div class="track-artist">Suno Downloader</div>
+            <div class="track-artist" id="current-artist">Suno Downloader</div>
+            <div id="current-style" style="margin-top: 6px; font-size: 12px; color: #ffbb00; font-style: italic; display: none;"></div>
+            <button id="toggle-lyrics-btn" type="button" style="margin-top: 8px; background: rgba(210, 136, 255, 0.15); border: 1px solid #b366ff; color: #d288ff; border-radius: 12px; padding: 2px 10px; font-size: 11px; cursor: pointer; display: none;">📝 View Lyrics</button>
+        </div>
+
+        <!-- Lyrics Modal / Overlay -->
+        <div id="lyrics-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); z-index: 999; justify-content: center; align-items: center; padding: 20px;">
+            <div style="background: #1e1e1e; border: 1px solid #444; border-radius: 12px; max-width: 550px; width: 100%; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.8);">
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid #333;">
+                    <h3 id="lyrics-modal-title" style="margin: 0; font-size: 16px; color: #fff;">Lyrics</h3>
+                    <button id="close-lyrics-btn" type="button" style="background: none; border: none; color: #aaa; font-size: 20px; cursor: pointer;">✕</button>
+                </div>
+                <div id="lyrics-modal-content" style="padding: 20px; overflow-y: auto; white-space: pre-wrap; font-family: monospace; font-size: 13px; color: #ddd; line-height: 1.6;"></div>
+            </div>
         </div>
 
         <div class="controls">
@@ -294,9 +307,27 @@
         <ul class="playlist" id="playlist">
             {% if songs %}
                 {% for song in songs %}
-                <li class="playlist-item" data-src="/audio_file/{{ song }}" data-title="{{ song }}">
-                    <span class="item-icon">🎵</span>
-                    <span class="item-name">{{ song }}</span>
+                <li class="playlist-item" 
+                    data-src="/audio_file/{{ song.filename }}" 
+                    data-title="{{ song.filename }}" 
+                    data-image="{{ '/audio_file/' + song.image if song.image else '' }}" 
+                    data-style="{{ song.style or '' }}"
+                    data-lyrics="{{ song.lyrics or '' }}"
+                    style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; overflow: hidden; flex: 1;">
+                        {% if song.image %}
+                        <img src="/audio_file/{{ song.image }}" style="width: 24px; height: 24px; border-radius: 4px; object-fit: cover; margin-right: 10px; flex-shrink: 0;" alt="Cover">
+                        {% else %}
+                        <span class="item-icon">🎵</span>
+                        {% endif %}
+                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            <div class="item-name">{{ song.filename }}</div>
+                            {% if song.style %}
+                            <div style="font-size: 11px; color: #ffbb00; opacity: 0.85;">🏷 {{ song.style }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <button class="delete-track-btn" data-filename="{{ song.filename }}" title="Delete track" style="background: rgba(255, 68, 68, 0.15); border: 1px solid #ff4444; color: #ff4444; border-radius: 6px; padding: 4px 10px; font-size: 13px; font-weight: bold; cursor: pointer; margin-left: 10px; flex-shrink: 0;">🗑 Delete</button>
                 </li>
                 {% endfor %}
             {% else %}
@@ -316,6 +347,7 @@
     const currentTimeEl = document.getElementById('current-time');
     const durationEl = document.getElementById('duration');
     const currentTitle = document.getElementById('current-title');
+    const coverArtEl = document.querySelector('.cover-art');
     const playlistItems = document.querySelectorAll('.playlist-item');
     
     let currentIndex = 0;
@@ -324,6 +356,16 @@
     if(playlistItems.length > 0) {
         loadTrack(0);
     }
+
+    const currentArtist = document.getElementById('current-artist');
+    const currentStyle = document.getElementById('current-style');
+    const toggleLyricsBtn = document.getElementById('toggle-lyrics-btn');
+    const lyricsModal = document.getElementById('lyrics-modal');
+    const lyricsTitle = document.getElementById('lyrics-modal-title');
+    const lyricsContent = document.getElementById('lyrics-modal-content');
+    const closeLyricsBtn = document.getElementById('close-lyrics-btn');
+
+    let currentLyricsText = "";
 
     function loadTrack(index) {
         if(index < 0 || index >= playlistItems.length) return;
@@ -337,12 +379,53 @@
         selectedItem.classList.add('active');
         
         audio.src = selectedItem.getAttribute('data-src');
-        currentTitle.textContent = selectedItem.getAttribute('data-title');
+        const titleText = selectedItem.getAttribute('data-title');
+        currentTitle.textContent = titleText;
         
+        const imgSrc = selectedItem.getAttribute('data-image');
+        if (imgSrc) {
+            coverArtEl.innerHTML = `<img src="${imgSrc}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 15px;" alt="Album Cover">`;
+        } else {
+            coverArtEl.innerHTML = `🎵`;
+        }
+
+        // Style and Lyrics updates
+        const styleText = selectedItem.getAttribute('data-style');
+        if (styleText) {
+            currentStyle.textContent = `🏷 ${styleText}`;
+            currentStyle.style.display = 'block';
+        } else {
+            currentStyle.style.display = 'none';
+        }
+
+        currentLyricsText = selectedItem.getAttribute('data-lyrics') || "";
+        if (currentLyricsText.trim()) {
+            toggleLyricsBtn.style.display = 'inline-block';
+        } else {
+            toggleLyricsBtn.style.display = 'none';
+        }
+
         if (isPlaying) {
             audio.play();
         }
     }
+
+    toggleLyricsBtn.addEventListener('click', () => {
+        if (!currentLyricsText) return;
+        lyricsTitle.textContent = `Lyrics: ${currentTitle.textContent}`;
+        lyricsContent.textContent = currentLyricsText;
+        lyricsModal.style.display = 'flex';
+    });
+
+    closeLyricsBtn.addEventListener('click', () => {
+        lyricsModal.style.display = 'none';
+    });
+
+    lyricsModal.addEventListener('click', (e) => {
+        if (e.target === lyricsModal) {
+            lyricsModal.style.display = 'none';
+        }
+    });
 
     function togglePlay() {
         if (playlistItems.length === 0) return;
@@ -398,11 +481,34 @@
     });
 
     playlistItems.forEach((item, index) => {
-        item.addEventListener('click', () => {
+        item.addEventListener('click', (e) => {
+            if (e.target.classList.contains('delete-track-btn')) return;
             loadTrack(index);
             audio.play();
             playBtn.textContent = '⏸';
             isPlaying = true;
+        });
+    });
+
+    document.querySelectorAll('.delete-track-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const filename = btn.getAttribute('data-filename');
+            if (!confirm(`Delete "${filename}"?`)) return;
+            
+            const formData = new FormData();
+            formData.append('filename', filename);
+            try {
+                const res = await fetch('/delete_audio', { method: 'POST', body: formData });
+                if (res.ok) {
+                    const row = btn.closest('.playlist-item');
+                    if (row) row.remove();
+                } else {
+                    alert('Could not delete file.');
+                }
+            } catch (err) {
+                alert('Error deleting file: ' + err.message);
+            }
         });
     });
 

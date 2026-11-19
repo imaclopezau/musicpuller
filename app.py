@@ -254,7 +254,17 @@ def playlist_status():
         except:
             return jsonify({"status": "Loading..."})
             
-    return jsonify({"status": "Stopped"})
+@app.route('/clear_playlist', methods=['POST'])
+def clear_playlist():
+    music_dir = get_download_dir()
+    status_file = os.path.join(music_dir, "playlist_status.json")
+    if os.path.exists(status_file):
+        try:
+            os.remove(status_file)
+        except Exception:
+            with open(status_file, "w") as f:
+                json.dump({"status": "Stopped"}, f)
+    return jsonify({"status": "cleared"})
 
 @app.route('/stop_auto', methods=['POST'])
 def stop_auto():
@@ -312,14 +322,83 @@ def get_devices():
 @app.route('/audio_file/<path:filename>')
 def serve_audio(filename):
     music_dir = get_download_dir()
-    return send_file(os.path.join(music_dir, filename))
+    # Normalize and ensure no directory traversal outside music_dir
+    safe_rel_path = os.path.normpath(filename).lstrip('\\/')
+    target_path = os.path.abspath(os.path.join(music_dir, safe_rel_path))
+    if not target_path.startswith(os.path.abspath(music_dir)):
+        return jsonify({"error": "Forbidden"}), 403
+    return send_file(target_path)
+
+@app.route('/delete_audio', methods=['POST'])
+def delete_audio():
+    music_dir = get_download_dir()
+    filename = request.form.get('filename', '').strip()
+    if not filename:
+        return jsonify({"error": "No filename provided"}), 400
+    safe_rel_path = os.path.normpath(filename).lstrip('\\/')
+    target_path = os.path.abspath(os.path.join(music_dir, safe_rel_path))
+    if not target_path.startswith(os.path.abspath(music_dir)):
+        return jsonify({"error": "Forbidden"}), 403
+    if os.path.exists(target_path):
+        try:
+            os.remove(target_path)
+            return jsonify({"status": "deleted", "filename": filename})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    return jsonify({"error": "File not found"}), 404
 
 @app.route('/player')
 def player():
     music_dir = get_download_dir()
     os.makedirs(music_dir, exist_ok=True)
     valid_exts = ('.mp3', '.m4a', '.webm', '.wav')
-    songs = [f for f in os.listdir(music_dir) if f.lower().endswith(valid_exts)]
+    songs = []
+    for root, dirs, files in os.walk(music_dir):
+        # Exclude Archive directory from main player view
+        if "Archive" in root:
+            continue
+        for f in files:
+            if f.lower().endswith(valid_exts):
+                rel_path = os.path.relpath(os.path.join(root, f), music_dir).replace('\\', '/')
+                # Check for corresponding cover image and metadata in same folder
+                base = os.path.splitext(f)[0]
+                clean_base = re.sub(r'\s*-\s*rem$', '', base, flags=re.IGNORECASE)
+                img_path = None
+                for ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                    candidate = os.path.join(root, f"{clean_base}{ext}")
+                    if os.path.exists(candidate):
+                        img_path = os.path.relpath(candidate, music_dir).replace('\\', '/')
+                        break
+                
+                # Check metadata JSON or lyrics text
+                style_val = ""
+                lyrics_val = ""
+                meta_json_path = os.path.join(root, f"{clean_base}.metadata.json")
+                if os.path.exists(meta_json_path):
+                    try:
+                        with open(meta_json_path, 'r', encoding='utf-8') as mf:
+                            mdata = json.load(mf)
+                            style_val = mdata.get("style", "")
+                            lyrics_val = mdata.get("lyrics", "")
+                    except Exception:
+                        pass
+                if not lyrics_val:
+                    lyr_txt_path = os.path.join(root, f"{clean_base}.lyrics.txt")
+                    if os.path.exists(lyr_txt_path):
+                        try:
+                            with open(lyr_txt_path, 'r', encoding='utf-8') as lf:
+                                lyrics_val = lf.read()
+                        except Exception:
+                            pass
+
+                songs.append({
+                    "filename": rel_path,
+                    "image": img_path,
+                    "style": style_val,
+                    "lyrics": lyrics_val
+                })
+    # Sort with newest or alphabetical
+    songs.sort(key=lambda s: s["filename"])
     return render_template('player.html', songs=songs, download_dir=music_dir)
 
 if __name__ == '__main__':

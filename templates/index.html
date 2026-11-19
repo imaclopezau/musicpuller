@@ -55,7 +55,6 @@
         }
         #stop-btn {
             background-color: #ff4444;
-            display: none;
         }
         #stop-btn:hover {
             background-color: #cc0000;
@@ -111,16 +110,6 @@
         <small id="dir-status-text" style="color: #888; display: block; margin-top: 5px;">Saved tracks will be stored in this directory.</small>
     </div>
 
-    <div style="margin-bottom: 20px; text-align: left;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <label for="gemini_api_key" style="color: #ccc; font-size: 14px;">Gemini API Key (Optional for AI Clean):</label>
-            <span id="api-key-status" style="font-size: 11px; color: #888;"></span>
-        </div>
-        <div style="display: flex; gap: 8px;">
-            <input type="password" id="gemini_api_key" placeholder="AIzaSy... (free key from aistudio.google.com)" style="flex: 1; padding: 10px 12px; border: 1px solid #333; background-color: #2a2a2a; color: #fff; border-radius: 6px; font-size: 13px;">
-            <button type="button" id="save-key-btn" style="width: auto; padding: 10px 16px; margin: 0; font-size: 13px; background-color: #444; white-space: nowrap;">Save Key</button>
-        </div>
-    </div>
     <div class="tabs" style="display: flex; margin-bottom: 20px;">
         <button id="tab-playlist" style="flex: 1; margin: 0 5px 0 0; background-color: #ff5e00;">Playlist Mode</button>
         <button id="tab-manual" style="flex: 1; margin: 0 0 0 5px; background-color: #333;">Manual Mode</button>
@@ -128,12 +117,26 @@
 
     <div id="playlist-section">
         <p style="margin-bottom: 10px;">Paste up to 10 Suno links below (one per line). The app will automatically open them, click play, and record the audio!</p>
-        <textarea id="playlist-links" rows="6" style="width: 100%; box-sizing: border-box; padding: 10px; background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 6px; margin-bottom: 15px;" placeholder="https://suno.com/song/...\nhttps://suno.com/song/..."></textarea>
-        <button type="button" id="start-playlist-btn">Start Playlist</button>
+        <textarea id="playlist-links" rows="6" style="width: 100%; box-sizing: border-box; padding: 10px; background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 6px; margin-bottom: 10px;" placeholder="https://suno.com/song/...\nhttps://suno.com/song/..."></textarea>
+        
+        <div style="display: flex; gap: 8px; margin-bottom: 15px;">
+            <button type="button" id="start-playlist-btn" style="flex: 2; margin: 0;">Start Playlist</button>
+            <button type="button" id="clear-playlist-links-btn" style="flex: 1; background: #2a2a2a; border: 1px solid #444; font-size: 13px; margin: 0; color: #ff6666;">Clear Links</button>
+        </div>
         
         <div id="playlist-status-container" style="background-color: #333; padding: 15px; border-radius: 6px; margin-top: 15px; text-align: left; display: none;">
-            <p id="playlist-status-text" style="color: #ff5e00; font-weight: bold; margin: 0 0 5px 0;">Playlist Status:</p>
-            <p id="playlist-status-details" style="color: #ccc; margin: 0; font-size: 14px;">Initializing...</p>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <p id="playlist-status-text" style="color: #ff5e00; font-weight: bold; margin: 0;">Playlist Progress</p>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <span id="playlist-overall-counter" style="font-size: 13px; color: #aaa; background: #222; padding: 3px 8px; border-radius: 10px;">0 / 0</span>
+                    <button type="button" id="reset-playlist-view-btn" style="width: auto; padding: 3px 8px; font-size: 11px; background: #222; border: 1px solid #444; border-radius: 4px; margin: 0; color: #bbb;">Clear Cards</button>
+                </div>
+            </div>
+            <p id="playlist-status-details" style="color: #ccc; margin: 0 0 12px 0; font-size: 14px;">Initializing...</p>
+            
+            <!-- Cards list for each playlist link -->
+            <div id="playlist-cards-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 380px; overflow-y: auto;">
+            </div>
         </div>
     </div>
     
@@ -234,6 +237,9 @@
         document.getElementById('tab-playlist').style.backgroundColor = '#333';
     });
 
+    let hasGeminiApiKey = false;
+    let geminiApiKey = '';
+
     // Load & Save download directory
     async function loadSettings() {
         try {
@@ -242,39 +248,15 @@
             if (data.download_dir) {
                 document.getElementById('download_dir').value = data.download_dir;
             }
+            hasGeminiApiKey = !!data.has_api_key;
             if (data.gemini_api_key) {
-                document.getElementById('gemini_api_key').value = data.gemini_api_key;
-            }
-            const keyStatus = document.getElementById('api-key-status');
-            if (data.has_api_key) {
-                keyStatus.textContent = '✓ Configured';
-                keyStatus.style.color = '#00ff88';
-            } else {
-                keyStatus.textContent = 'No key set';
-                keyStatus.style.color = '#888';
+                geminiApiKey = data.gemini_api_key;
             }
         } catch (e) {
             console.error("Failed to load settings", e);
         }
     }
     loadSettings();
-
-    document.getElementById('save-key-btn').addEventListener('click', async () => {
-        const keyVal = document.getElementById('gemini_api_key').value.trim();
-        const keyStatus = document.getElementById('api-key-status');
-        const formData = new FormData();
-        formData.append('gemini_api_key', keyVal);
-        try {
-            const res = await fetch('/settings', { method: 'POST', body: formData });
-            const data = await res.json();
-            if (res.ok) {
-                keyStatus.textContent = data.has_api_key ? '✓ Key Saved!' : 'Key Cleared';
-                keyStatus.style.color = data.has_api_key ? '#00ff88' : '#888';
-            }
-        } catch (e) {
-            alert('Failed to save key: ' + e.message);
-        }
-    });
 
     document.getElementById('save-dir-btn').addEventListener('click', async () => {
         const dirVal = document.getElementById('download_dir').value.trim();
@@ -355,6 +337,9 @@
         }
     }
     
+    let playlistDoneTimeout = null;
+    let lastPlaylistStatus = null;
+
     async function pollPlaylistStatus() {
         try {
             const res = await fetch('/playlist_status');
@@ -362,18 +347,177 @@
             
             const pCont = document.getElementById('playlist-status-container');
             const pDetails = document.getElementById('playlist-status-details');
+            const pCounter = document.getElementById('playlist-overall-counter');
+            const cardsList = document.getElementById('playlist-cards-list');
             
-            if (data.status === 'Stopped') {
+            if (data.status === 'Stopped' && !data.tracks) {
                 pCont.style.display = 'none';
+                lastPlaylistStatus = 'Stopped';
+                return;
+            }
+
+            pCont.style.display = 'block';
+            pDetails.textContent = data.status || "";
+
+            if (data.total_tracks) {
+                const activeIdx = data.active_index || 0;
+                pCounter.textContent = `${activeIdx} / ${data.total_tracks}`;
+            }
+
+            if (data.status === 'All Tracks Completed' || data.status === 'Done') {
+                pDetails.style.color = '#00ff88';
+                pDetails.textContent = '✓ All Tracks Completed - Verification Results Below';
             } else {
-                pCont.style.display = 'block';
-                pDetails.textContent = data.status;
-                if (data.status === 'Done') {
-                    pDetails.style.color = '#00ff00';
-                    setTimeout(() => { pCont.style.display = 'none'; }, 5000);
-                } else {
-                    pDetails.style.color = '#ccc';
-                }
+                pDetails.style.color = '#ccc';
+            }
+
+            // Render each track card if playlist has structured tracks
+            if (data.tracks && Array.isArray(data.tracks)) {
+                cardsList.innerHTML = '';
+                data.tracks.forEach((track, idx) => {
+                    const card = document.createElement('div');
+                    card.style.background = '#222';
+                    card.style.borderRadius = '6px';
+                    card.style.padding = '10px 12px';
+                    card.style.border = '1px solid #333';
+                    card.style.textAlign = 'left';
+
+                    // Highlight active card
+                    if (data.active_index === track.index && (track.state === 'recording' || track.state === 'loading' || track.state === 'analyzing')) {
+                        card.style.borderColor = '#ff5e00';
+                        card.style.boxShadow = '0 0 8px rgba(255, 94, 0, 0.3)';
+                    }
+
+                    // Top Row: Number, Title, and Traffic Light Badge
+                    const topRow = document.createElement('div');
+                    topRow.style.display = 'flex';
+                    topRow.style.justifyContent = 'space-between';
+                    topRow.style.alignItems = 'center';
+                    topRow.style.marginBottom = '6px';
+
+                    const titleWrapper = document.createElement('div');
+                    titleWrapper.style.display = 'flex';
+                    titleWrapper.style.alignItems = 'center';
+                    titleWrapper.style.gap = '8px';
+                    titleWrapper.style.maxWidth = '70%';
+                    titleWrapper.style.overflow = 'hidden';
+
+                    if (track.cover_img_url) {
+                        const thumb = document.createElement('img');
+                        thumb.src = track.cover_img_url;
+                        thumb.style.width = '32px';
+                        thumb.style.height = '32px';
+                        thumb.style.borderRadius = '4px';
+                        thumb.style.objectFit = 'cover';
+                        thumb.style.flexShrink = '0';
+                        titleWrapper.appendChild(thumb);
+                    }
+
+                    const titleSpan = document.createElement('span');
+                    titleSpan.style.fontWeight = 'bold';
+                    titleSpan.style.fontSize = '14px';
+                    titleSpan.style.color = '#fff';
+                    titleSpan.style.whiteSpace = 'nowrap';
+                    titleSpan.style.overflow = 'hidden';
+                    titleSpan.style.textOverflow = 'ellipsis';
+                    titleSpan.textContent = `#${track.index}. ${track.title || 'Loading...'}`;
+                    titleWrapper.appendChild(titleSpan);
+                    topRow.appendChild(titleWrapper);
+
+                    // Quality / Status Badge
+                    const badge = document.createElement('span');
+                    badge.style.fontSize = '12px';
+                    badge.style.fontWeight = 'bold';
+                    badge.style.padding = '3px 8px';
+                    badge.style.borderRadius = '12px';
+                    badge.style.display = 'inline-flex';
+                    badge.style.alignItems = 'center';
+                    badge.style.gap = '5px';
+
+                    if (track.quality) {
+                        if (track.quality.status === 'green') {
+                            badge.style.background = '#0a3d1b';
+                            badge.style.color = '#00ff88';
+                            badge.style.border = '1px solid #00aa55';
+                            badge.innerHTML = `🟢 ${track.quality.label || 'Clean'}`;
+                        } else if (track.quality.status === 'amber') {
+                            badge.style.background = '#42330a';
+                            badge.style.color = '#ffbb00';
+                            badge.style.border = '1px solid #aa8800';
+                            badge.innerHTML = `🟡 ${track.quality.label || 'Warning'}`;
+                        } else {
+                            badge.style.background = '#401111';
+                            badge.style.color = '#ff4444';
+                            badge.style.border = '1px solid #aa2222';
+                            badge.innerHTML = `🔴 ${track.quality.label || 'Error'}`;
+                        }
+                        if (track.quality.details) {
+                            badge.title = track.quality.details;
+                        }
+                    } else if (track.state === 'recording') {
+                        badge.style.background = '#4a2500';
+                        badge.style.color = '#ff9900';
+                        badge.style.border = '1px solid #ff5e00';
+                        badge.innerHTML = `🔴 REC`;
+                    } else if (track.state === 'loading') {
+                        badge.style.background = '#2a2a2a';
+                        badge.style.color = '#aaa';
+                        badge.innerHTML = `⏳ Loading`;
+                    } else if (track.state === 'analyzing') {
+                        badge.style.background = '#2a2a2a';
+                        badge.style.color = '#00d2ff';
+                        badge.innerHTML = `🔍 Verifying`;
+                    } else {
+                        badge.style.background = '#1a1a1a';
+                        badge.style.color = '#777';
+                        badge.innerHTML = `Queued`;
+                    }
+                    topRow.appendChild(badge);
+                    card.appendChild(topRow);
+
+                    // Bottom Row: Length, Counter, Details
+                    const btmRow = document.createElement('div');
+                    btmRow.style.display = 'flex';
+                    btmRow.style.justifyContent = 'space-between';
+                    btmRow.style.fontSize = '12px';
+                    btmRow.style.color = '#aaa';
+
+                    const durSpan = document.createElement('span');
+                    if (track.state === 'recording') {
+                        durSpan.innerHTML = `⏱ Counter: <b style="color:#00ff88;">${track.counter || '0:00'}</b> <span style="color:#666;">/ ${track.expected_length || '--:--'}</span>`;
+                    } else if (track.state === 'finished' || track.state === 'error') {
+                        durSpan.innerHTML = `⏱ Length: <b style="color:#fff;">${track.recorded_length || track.expected_length || '--:--'}</b>`;
+                    } else {
+                        durSpan.innerHTML = `⏱ Expected: <span>${track.expected_length || '--:--'}</span>`;
+                    }
+                    btmRow.appendChild(durSpan);
+
+                    const detailSpan = document.createElement('span');
+                    if (track.quality && track.quality.details) {
+                        detailSpan.style.color = track.quality.status === 'green' ? '#00dd77' : (track.quality.status === 'amber' ? '#ffcc00' : '#ff6666');
+                        detailSpan.textContent = track.quality.details;
+                    } else {
+                        detailSpan.textContent = track.state.toUpperCase();
+                    }
+                    btmRow.appendChild(detailSpan);
+                    card.appendChild(btmRow);
+
+                    if (track.mastering) {
+                        const masterRow = document.createElement('div');
+                        masterRow.style.marginTop = '6px';
+                        masterRow.style.paddingTop = '6px';
+                        masterRow.style.borderTop = '1px solid #333';
+                        masterRow.style.fontSize = '11px';
+                        masterRow.style.color = '#888';
+                        const hasImg = track.mastering.image ? `&nbsp; • &nbsp; <span style="color:#00d2ff;">🖼 Cover Art</span>` : '';
+                        const hasLyr = track.mastering.has_lyrics ? `&nbsp; • &nbsp; <span style="color:#d288ff;">📝 Lyrics</span>` : '';
+                        const styleInfo = track.mastering.style ? `&nbsp; • &nbsp; <span style="color:#ffcc00; font-style:italic;">🏷 ${track.mastering.style}</span>` : '';
+                        masterRow.innerHTML = `📁 <b>${track.mastering.artist}/${track.mastering.track}/</b> &nbsp; • &nbsp; <span style="color:#00ff88;">WAV</span>, <span style="color:#00ff88;">Rem. WAV</span>, <span style="color:#ff9900;">MP3</span>${hasImg}${hasLyr}${styleInfo}`;
+                        card.appendChild(masterRow);
+                    }
+
+                    cardsList.appendChild(card);
+                });
             }
         } catch (e) {
             console.error(e);
@@ -623,10 +767,8 @@
             previewImg.src = dataUrl;
             previewContainer.style.display = 'block';
 
-            const keyVal = document.getElementById('gemini_api_key').value.trim();
-
             // PREFERRED & ULTRA-ACCURATE: Send directly to Gemini 2.5 Flash Vision
-            if (keyVal) {
+            if (hasGeminiApiKey || geminiApiKey) {
                 ocrLoading.textContent = '✨ AI is analyzing image and reading tracks & durations...';
                 try {
                     const res = await fetch('/clean_with_ai', {
@@ -635,7 +777,7 @@
                         body: JSON.stringify({ 
                             image_b64: dataUrl,
                             mime_type: file.type || 'image/png',
-                            api_key: keyVal 
+                            api_key: geminiApiKey 
                         })
                     });
                     const data = await res.json();
@@ -707,15 +849,13 @@
     }
 
     document.getElementById('ai-clean-btn').addEventListener('click', () => {
-        const keyVal = document.getElementById('gemini_api_key').value.trim();
-        if (!keyVal) {
-            alert("Please enter a Gemini API Key in the settings field above to use AI cleaning!");
-            document.getElementById('gemini_api_key').focus();
+        if (!hasGeminiApiKey && !geminiApiKey) {
+            alert("No Gemini API Key is configured on the server!");
             return;
         }
         // Build raw text from existing items if needed
         const raw = trackList.map(t => t.name).join('\n');
-        runAiClean(raw, keyVal, true);
+        runAiClean(raw, geminiApiKey, true);
     });
 
     function cleanAndPopulateTrackNames(rawText) {
@@ -797,7 +937,7 @@
         
         try {
             await fetch('/start_auto', { method: 'POST', body: formData });
-            document.getElementById('stop-btn').style.display = 'block';
+            document.getElementById('recording-actions').style.display = 'flex';
             
             document.getElementById('status-text').textContent = "Status: Starting...";
             document.getElementById('status-details').textContent = "Connecting to device...";
@@ -823,7 +963,7 @@
         
         try {
             await fetch('/start_playlist', { method: 'POST', body: formData });
-            document.getElementById('stop-btn').style.display = 'block';
+            document.getElementById('recording-actions').style.display = 'flex';
             
             document.getElementById('playlist-status-container').style.display = 'block';
             document.getElementById('playlist-status-details').textContent = "Initializing Playlist...";
@@ -831,6 +971,21 @@
         } catch (e) {
             alert("Error starting playlist: " + e.message);
         }
+    });
+
+    document.getElementById('clear-playlist-links-btn').addEventListener('click', () => {
+        const area = document.getElementById('playlist-links');
+        if (area.value.trim() && confirm('Clear playlist links?')) {
+            area.value = '';
+        }
+    });
+
+    document.getElementById('reset-playlist-view-btn').addEventListener('click', async () => {
+        try {
+            await fetch('/clear_playlist', { method: 'POST' });
+        } catch (e) {}
+        document.getElementById('playlist-cards-list').innerHTML = '';
+        document.getElementById('playlist-status-container').style.display = 'none';
     });
 
     document.getElementById('cut-btn').addEventListener('click', async () => {
