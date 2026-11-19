@@ -177,9 +177,18 @@ def remaster_and_export(raw_wav_path, output_dir, track_title, artist_name, imag
     if res_mp3.returncode != 0:
         raise RuntimeError(f"FFmpeg MP3 export failed: {res_mp3.stderr}")
 
+    # 7. Compute DSP Acoustic Features (BPM, Key, Energy Score, Features)
+    analysis_data = compute_audio_analysis(dest_rem_wav)
+
+    # Update metadata JSON with analysis
+    meta_payload["analysis"] = analysis_data
+    with open(dest_json, "w", encoding="utf-8") as f:
+        json.dump(meta_payload, f, indent=2, ensure_ascii=False)
+
     return {
         "artist": clean_artist,
         "track": clean_track,
+        "display_title": track_title,
         "style": style,
         "lyrics": lyrics,
         "artist_dir": artist_dir,
@@ -190,5 +199,86 @@ def remaster_and_export(raw_wav_path, output_dir, track_title, artist_name, imag
         "image": dest_jpg if (downloaded_cover and os.path.exists(dest_jpg)) else None,
         "style_file": dest_style if has_style else None,
         "lyrics_file": dest_lyrics if has_lyrics else None,
-        "metadata_file": dest_json
+        "metadata_file": dest_json,
+        "analysis": analysis_data
     }
+
+def compute_audio_analysis(wav_path):
+    """Computes BPM, Key, Energy Score, and acoustic features via librosa."""
+    try:
+        import librosa
+        import numpy as np
+
+        y, sr = librosa.load(wav_path, sr=22050, duration=120) # analyze first 2 min for fast, accurate DSP
+        
+        # 1. BPM
+        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+        bpm = float(tempo[0] if isinstance(tempo, np.ndarray) else tempo)
+
+        # 2. RMS Energy & Max Peak
+        rms = librosa.feature.rms(y=y)
+        mean_rms = float(np.mean(rms))
+        max_peak = float(np.max(np.abs(y)))
+        crest_factor = round(max_peak / (mean_rms + 1e-6), 2)
+
+        # 3. Spectral Centroid
+        cent = librosa.feature.spectral_centroid(y=y, sr=sr)
+        mean_cent = float(np.mean(cent))
+
+        # 4. HPSS Percussive vs Harmonic Ratio
+        y_harmonic, y_percussive = librosa.effects.hpss(y)
+        percussive_ratio = float(np.sum(np.abs(y_percussive)) / (np.sum(np.abs(y_harmonic)) + 1e-6))
+
+        # 5. Flatness
+        flatness = librosa.feature.spectral_flatness(y=y)
+        mean_flatness = float(np.mean(flatness))
+
+        # 6. Dominant Key
+        chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+        mean_chroma = np.mean(chroma, axis=1)
+        keys = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+        dominant_key = keys[int(np.argmax(mean_chroma))]
+
+        # 7. Energy Score (0-100)
+        normalized_rms = min(mean_rms / 0.35, 1.0)
+        normalized_cent = min(mean_cent / 5000.0, 1.0)
+        energy_score = round(((normalized_rms * 0.7) + (normalized_cent * 0.3)) * 100, 1)
+
+        # 8. Search Tags
+        search_tags = []
+        if bpm > 120: search_tags.append("is_fast")
+        if bpm < 90: search_tags.append("is_slow")
+        if mean_rms > 0.15: search_tags.append("is_energetic")
+        if mean_rms < 0.05: search_tags.append("is_chill")
+        if percussive_ratio > 0.8: search_tags.append("is_rhythm_heavy")
+        if mean_cent < 1500: search_tags.append("is_mellow")
+
+        return {
+            "bpm": round(bpm, 1),
+            "energyScore": energy_score,
+            "dominantKey": dominant_key,
+            "search_tags": search_tags,
+            "features": {
+                "spectral_centroid_mean": round(mean_cent, 2),
+                "rms_energy_mean": round(mean_rms, 4),
+                "percussive_ratio": round(percussive_ratio, 3),
+                "spectral_flatness_mean": round(mean_flatness, 5),
+                "dominant_key": dominant_key
+            },
+            "metrics": {
+                "crestFactor": crest_factor,
+                "transientDensity": round(percussive_ratio, 2),
+                "maxPeak": round(max_peak, 3)
+            }
+        }
+    except Exception as e:
+        print(f"Warning: Audio DSP analysis skipped ({e})")
+        return {
+            "bpm": None,
+            "energyScore": 50,
+            "dominantKey": "C",
+            "search_tags": [],
+            "features": {},
+            "metrics": {"crestFactor": 1.0, "maxPeak": 1.0}
+        }
+

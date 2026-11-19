@@ -47,8 +47,11 @@ def set_download_dir(path):
     os.makedirs(path, exist_ok=True)
     set_config_value('download_dir', path)
 
+from flask_cors import CORS
+
 app = Flask(__name__)
 app.secret_key = 'super_secret_key' # Needed for flash messages
+CORS(app, origins="*")
 
 active_process = None
 
@@ -400,6 +403,199 @@ def player():
     # Sort with newest or alphabetical
     songs.sort(key=lambda s: s["filename"])
     return render_template('player.html', songs=songs, download_dir=music_dir)
+
+# ==========================================
+# MUSICBANK INTEGRATION API ENDPOINTS
+# ==========================================
+
+import time
+
+@app.route('/api/evaluate_links', methods=['POST'])
+def api_evaluate_links():
+    """Fast headless evaluation of up to 10 Suno links."""
+    data = request.get_json(silent=True) or {}
+    links = data.get('links', [])
+    if isinstance(links, str):
+        links = [l.strip() for l in links.split('\n') if l.strip()]
+
+    valid_links = [l for l in links if l.startswith('http')][:10]
+    if not valid_links:
+        return jsonify({"error": "No valid links provided"}), 400
+
+    results = []
+    from playwright.sync_api import sync_playwright
+    from mastering_pipeline import parse_title_and_artist, sanitize_filename
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=False,
+                args=["--autoplay-policy=no-user-gesture-required", "--window-size=800,600"]
+            )
+            context = browser.new_context(viewport={"width": 800, "height": 600})
+            page = context.new_page()
+
+            for l in valid_links:
+                try:
+                    page.goto(l, wait_until="domcontentloaded", timeout=15000)
+                    time.sleep(3)
+
+                    title = page.title()
+                    if not title or title.strip() == "" or title.startswith("Suno |"):
+                        time.sleep(2)
+                        title = page.title()
+
+                    if title.endswith("| Suno"):
+                        title = title[:-6].strip()
+
+                    meta = page.evaluate('''() => {
+                        try {
+                            const showMoreBtn = Array.from(document.querySelectorAll('button, span, div')).find(el => {
+                                const t = (el.innerText || '').toLowerCase();
+                                return t.includes('show full style') || t.includes('show full styles');
+                            });
+                            if (showMoreBtn) showMoreBtn.click();
+                        } catch (e) {}
+
+                        const og = document.querySelector('meta[property="og:image"]');
+                        const tw = document.querySelector('meta[name="twitter:image"]');
+                        const img = document.querySelector('img[alt="Song Cover Image"], img[src*="cdn2.suno.ai/image_large"], img[src*="cdn-o.suno.com"]');
+                        const cover = (og && og.content) ? og.content : ((tw && tw.content) ? tw.content : (img ? img.src : null));
+
+                        const styleLinks = Array.from(document.querySelectorAll('a[href*="/style/"]'))
+                            .map(a => a.innerText.trim()).filter(Boolean);
+                        let style = styleLinks.join(', ');
+
+                        if (!style) {
+                            const styleBlock = Array.from(document.querySelectorAll('div, span, p')).find(el => {
+                                const t = el.innerText || '';
+                                return t.includes('Show full styles') || (el.className && el.className.includes('style'));
+                            });
+                            if (styleBlock && styleBlock.parentElement) {
+                                style = styleBlock.parentElement.innerText
+                                    .replace(/Show full styles/gi, '')
+                                    .replace(/\\+/g, '')
+                                    .replace(/\\n/g, ', ')
+                                    .trim();
+                            }
+                        }
+
+                        const lyricEl = Array.from(document.querySelectorAll('*')).find(el => {
+                            const st = window.getComputedStyle(el);
+                            const txt = el.innerText || '';
+                            return (st.whiteSpace.includes('pre') || el.tagName === 'PRE') && txt.length > 50 && (txt.includes('[') || txt.includes('\\n'));
+                        });
+                        const lyrics = lyricEl ? lyricEl.innerText.trim() : '';
+
+                        const durMatches = document.body.innerText.match(/\\b(\\d{1,2}:\\d{2})\\b/g);
+                        const duration = durMatches && durMatches.length > 0 ? durMatches[0] : "";
+
+                        return { cover, style, lyrics, duration };
+                    }''')
+
+                    parsed_title, parsed_artist = parse_title_and_artist(title)
+                    lyrics_text = meta.get("lyrics", "")
+                    is_inst = (not lyrics_text.strip()) or ("[instrumental]" in lyrics_text.lower())
+
+                    results.append({
+                        "link": l,
+                        "raw_title": title,
+                        "title": parsed_title,
+                        "artist": parsed_artist,
+                        "sanitized_title": sanitize_filename(parsed_title),
+                        "sanitized_artist": sanitize_filename(parsed_artist),
+                        "cover_url": meta.get("cover"),
+                        "style": meta.get("style", ""),
+                        "lyrics": lyrics_text,
+                        "duration": meta.get("duration", ""),
+                        "isInstrumental": is_inst,
+                        "isV6": True
+                    })
+                except Exception as err:
+                    results.append({
+                        "link": l,
+                        "raw_title": "Error fetching link",
+                        "title": "Unknown",
+                        "artist": "Unknown",
+                        "error": str(err),
+                        "isV6": True,
+                        "isInstrumental": False
+                    })
+            browser.close()
+    except Exception as e:
+        return jsonify({"error": f"Evaluation browser failed: {str(e)}"}), 500
+
+    return jsonify({"success": True, "tracks": results})
+
+@app.route('/api/pull_and_process', methods=['POST'])
+def api_pull_and_process():
+    """Starts the full capture, mastering, and asset generation pipeline."""
+    global active_process
+    data = request.get_json(silent=True) or {}
+    items = data.get('items', [])
+    target_dir = data.get('download_dir', '').strip() or r"C:\Users\Art\Documents\Songs"
+    device_name = data.get('device_name', '')
+
+    if not items:
+        return jsonify({"error": "No items provided"}), 400
+
+    os.makedirs(target_dir, exist_ok=True)
+
+    playlist_file = os.path.join(target_dir, "playlist.json")
+    with open(playlist_file, "w", encoding="utf-8") as f:
+        json.dump(items, f, indent=2, ensure_ascii=False)
+
+    stop_flag = os.path.join(target_dir, "stop_auto.flag")
+    if os.path.exists(stop_flag):
+        os.remove(stop_flag)
+
+    status_ui_file = os.path.join(target_dir, "playlist_status.json")
+    with open(status_ui_file, "w", encoding="utf-8") as f:
+        json.dump({"status": "Initializing Pull Pipeline...", "phase": 1, "tracks": []}, f, indent=2)
+
+    if active_process is not None and active_process.poll() is None:
+        active_process.terminate()
+        active_process.wait()
+
+    runner_script = os.path.join(app.root_path, 'playlist_runner.py')
+    log_file = open(os.path.join(target_dir, "runner.log"), "w", encoding="utf-8")
+    active_process = subprocess.Popen([sys.executable, runner_script, target_dir, device_name], stdout=log_file, stderr=subprocess.STDOUT)
+
+    return jsonify({"status": "started", "count": len(items), "download_dir": target_dir})
+
+@app.route('/api/pull_status', methods=['GET', 'POST'])
+def api_pull_status():
+    """Polls live status of the active ingestion pipeline."""
+    target_dir = request.args.get('dir') or request.form.get('download_dir', r"C:\Users\Art\Documents\Songs")
+    status_file = os.path.join(target_dir, "playlist_status.json")
+    if os.path.exists(status_file):
+        try:
+            with open(status_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return jsonify(data)
+        except Exception:
+            pass
+    return jsonify({"status": "Idle", "tracks": []})
+
+@app.route('/api/media', methods=['GET'])
+def api_media():
+    """Securely streams local audio/image file for Firebase upload."""
+    file_path = request.args.get('file', '').strip()
+    if not file_path or not os.path.exists(file_path):
+        return jsonify({"error": "File not found"}), 404
+
+    ext = os.path.splitext(file_path)[1].lower()
+    mime_map = {
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.txt': 'text/plain',
+        '.json': 'application/json'
+    }
+    mimetype = mime_map.get(ext, 'application/octet-stream')
+    return send_file(os.path.abspath(file_path), mimetype=mimetype)
 
 if __name__ == '__main__':
     print("Starting Suno Downloader UI...")

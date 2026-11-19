@@ -122,11 +122,28 @@ def main():
 
     # Initialize per-track tracking data
     tracks_data = []
-    for idx, l in enumerate(links):
+    for idx, item in enumerate(links):
+        if isinstance(item, dict):
+            url = item.get("url") or item.get("link")
+            t_artist = item.get("target_artist")
+            s_title = item.get("song_title")
+            s_id = item.get("song_id")
+            action = item.get("action", "create")
+        else:
+            url = item
+            t_artist = None
+            s_title = None
+            s_id = None
+            action = "create"
+
         tracks_data.append({
             "index": idx + 1,
-            "url": l,
-            "title": f"Track {idx + 1}",
+            "url": url,
+            "title": s_title or f"Track {idx + 1}",
+            "target_artist": t_artist,
+            "song_title": s_title,
+            "song_id": s_id,
+            "action": action,
             "expected_length": "--:--",
             "recorded_length": "0:00",
             "counter": "0:00",
@@ -299,6 +316,14 @@ def main():
                     
                     # Track live counter and duration
                     start_rec_time = time.time()
+                    expected_sec = 0
+                    if cur_track.get("expected_length") and ":" in str(cur_track["expected_length"]):
+                        try:
+                            pts = str(cur_track["expected_length"]).split(":")
+                            expected_sec = int(pts[0]) * 60 + int(pts[1])
+                        except Exception:
+                            pass
+
                     while True:
                         info = get_recorder_info()
                         st = info.get("state")
@@ -311,6 +336,24 @@ def main():
                         cur_track["counter"] = format_sec(elapsed)
                         cur_track["recorded_length"] = format_sec(elapsed)
                         save_playlist_data(playlist_state)
+
+                        # Detect natural playback end on Suno page (Edge Case 1 & 3 mitigation)
+                        if elapsed > 12:
+                            try:
+                                is_ended = page.evaluate('''() => {
+                                    const pauseBtn = document.querySelector("button[aria-label='Pause']") || 
+                                                     Array.from(document.querySelectorAll('button')).find(b => (b.getAttribute('aria-label') || '').toLowerCase().includes('pause'));
+                                    return !pauseBtn;
+                                }''')
+                                if is_ended or (expected_sec > 0 and elapsed >= expected_sec + 4):
+                                    next_flag = os.path.join(output_dir, "next_track.flag")
+                                    with open(next_flag, "w") as nf:
+                                        nf.write("next")
+                                    time.sleep(1)
+                                    break
+                            except Exception:
+                                pass
+
                         time.sleep(1)
                             
                 # Song finished recording, now running quality check
@@ -345,6 +388,13 @@ def main():
                     try:
                         from mastering_pipeline import parse_title_and_artist, remaster_and_export
                         parsed_track, parsed_artist = parse_title_and_artist(title)
+                        
+                        # Apply explicit target artist and song title if provided by MusicBank
+                        if cur_track.get("target_artist"):
+                            parsed_artist = cur_track["target_artist"]
+                        if cur_track.get("song_title"):
+                            parsed_track = cur_track["song_title"]
+
                         playlist_state["status"] = f"Mastering audio & converting MP3 ({parsed_artist} - {parsed_track})..."
                         save_playlist_data(playlist_state)
                         
@@ -367,6 +417,8 @@ def main():
                         if export_res.get("metadata_file"):
                             files_created.append(os.path.basename(export_res["metadata_file"]))
 
+                        cur_track["export_res"] = export_res
+                        cur_track["analysis"] = export_res.get("analysis")
                         cur_track["mastering"] = {
                             "artist": export_res["artist"],
                             "track": export_res["track"],
